@@ -1,0 +1,7 @@
+apiVersion: tektonexperimental.vincent-pli.com/v1alpha1
+kind: ListenerTemplate
+metadata:
+  name: listenertemplate-sample
+spec:
+  # Add fields here
+  foo: bar

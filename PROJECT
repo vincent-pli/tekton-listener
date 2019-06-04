@@ -1,0 +1,3 @@
+version: "2"
+domain: vincent-pli.com
+repo: github.com/vincent-pli/tekton-listener
