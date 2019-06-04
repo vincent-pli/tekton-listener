@@ -61,6 +61,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ListenerTemplate")
 		os.Exit(1)
 	}
+	err = (&controllers.EventBindingReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("EventBinding"),
+	}).SetupWithManager(mgr)
+	if err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EventBinding")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	setupLog.Info("starting manager")

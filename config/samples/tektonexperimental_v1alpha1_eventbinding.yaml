@@ -1,0 +1,7 @@
+apiVersion: tektonexperimental.vincent-pli.com/v1alpha1
+kind: EventBinding
+metadata:
+  name: eventbinding-sample
+spec:
+  # Add fields here
+  foo: bar
