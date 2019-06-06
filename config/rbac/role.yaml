@@ -1,0 +1,48 @@
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- apiGroups:
+  - tektonexperimental.vincent-pli.com
+  resources:
+  - eventbindings
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - tektonexperimental.vincent-pli.com
+  resources:
+  - eventbindings/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - tektonexperimental.vincent-pli.com
+  resources:
+  - listenertemplates
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - tektonexperimental.vincent-pli.com
+  resources:
+  - listenertemplates/status
+  verbs:
+  - get
+  - update
+  - patch

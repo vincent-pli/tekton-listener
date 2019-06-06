@@ -36,7 +36,6 @@ type EventBindingStatus struct {
 }
 
 // +kubebuilder:object:root=true
-
 // EventBinding is the Schema for the eventbindings API
 type EventBinding struct {
 	metav1.TypeMeta   `json:",inline"`

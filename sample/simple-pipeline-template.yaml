@@ -1,0 +1,38 @@
+apiVersion: tektonexperimental.vincent-pli.com/v1alpha1
+kind: ListenerTemplate
+metadata:
+  name: simple-pipeline-template
+  namespace: tekton-listener-system
+spec:
+  params:
+    - name: gitrevision
+      description: git revision
+      default: master
+    - name: gitrepositoryurl
+      description: git repository url
+    - name: dockerusername
+      description: docker username
+    - name: dockerappname
+      description: docker app name
+  resources:
+    - type: image
+      params:
+      - name: url
+        value: "docker.io/${params.dockerusername}/${params.dockerappname}"
+    - type: git
+      params:
+      - name: revision
+        value: ${params.gitrevision}
+      - name: url
+        value: ${params.gitrepositoryurl}
+  pipelinerun:
+    serviceAccount: default
+    pipelineRef:
+      name: simple-pipeline
+    resources:
+    - name: git-source
+      resourceRef:
+        name: git-source
+    - name: docker-image
+      resourceRef:
+        name: docker-image

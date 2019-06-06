@@ -20,7 +20,7 @@ import (
 	"context"
 
 	"github.com/go-logr/logr"
-	"github.com/prometheus/common/log"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -33,12 +33,12 @@ type ListenerTemplateReconciler struct {
 	Log logr.Logger
 }
 
-// Reconcile is
 // +kubebuilder:rbac:groups=tektonexperimental.vincent-pli.com,resources=listenertemplates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tektonexperimental.vincent-pli.com,resources=listenertemplates/status,verbs=get;update;patch
+
 func (r *ListenerTemplateReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	ctx = context.Background()
-	log = r.Log.WithValues("listenertemplate", req.NamespacedName)
+	ctx := context.Background()
+	log := r.Log.WithValues("listenertemplate", req.NamespacedName)
 
 	// your logic here
 	var listenerTemplate tektonexperimentalv1alpha1.ListenerTemplate

@@ -50,10 +50,9 @@ type ListenerTemplateStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-
 // ListenerTemplate is the Schema for the listenertemplates API
-// +kubebuilder:printcolumn:name="reference",type="int32",JSONPath=".status.availableReference""
+// +kubebuilder:printcolumn:name="reference",type="integer",JSONPath=".status.availableReference"
+
 type ListenerTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
