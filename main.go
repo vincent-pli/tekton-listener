@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"fmt"
 
 	tektonexperimentalv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
 	"github.com/vincent-pli/tekton-listener/controllers"
@@ -32,6 +33,7 @@ import (
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+	lsImageEnvVar = "LS_IMAGE"
 )
 
 func init() {
@@ -61,9 +63,17 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "ListenerTemplate")
 		os.Exit(1)
 	}
+
+	listenerAdapterImage, defined := os.LookupEnv(lsImageEnvVar)
+	if !defined {
+		return fmt.Errorf("required environment variable %q not defined", lsImageEnvVar)
+	}
+
 	err = (&controllers.EventBindingReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("EventBinding"),
+		listenerAdapterImage: listenerAdapterImage
+		schema: scheme
 	}).SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EventBinding")

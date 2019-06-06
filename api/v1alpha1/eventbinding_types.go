@@ -27,6 +27,38 @@ import (
 type EventBindingSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	// ServiceAccountName holds the name of the Kubernetes service account
+	// as which the underlying K8s resources should be run. If unspecified
+	// this will default to the "default" service account for the namespace
+	// in which the GitLabSource exists.
+	// +optional
+	ServiceAccountName string      `json:"serviceAccountName,omitempty"`
+	TemplateRef        TemplateRef `json:"templateRef"`
+	Event              Event       `json:"event"`
+	Params             []Param     `json:"params,omitempty"`
+}
+
+// Event use to define a cloud event.
+type Event struct {
+	// Class of Cloudevent
+	Class string `json:"class,omitempty"`
+	// Type of Cloudevent
+	Type string `json:"type,omitempty"`
+}
+
+// TemplateRef can be used to refer to a specific instance of a eventBinding.
+type TemplateRef struct {
+	// Name of the referent
+	Name string `json:"name,omitempty"`
+	// API version of the referent
+	// +optional
+	APIVersion string `json:"apiVersion,omitempty"`
+}
+
+// Param declares a value to use for the Param called Name.
+type Param struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // EventBindingStatus defines the observed state of EventBinding
