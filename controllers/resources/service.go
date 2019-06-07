@@ -40,17 +40,13 @@ func MakeService(source tektonexperimentalv1alpha1.EventBinding, receiveAdapterI
 			Labels:       labels,
 		},
 		Spec: servingv1alpha1.ServiceSpec{
-			RunLatest: &servingv1alpha1.RunLatestType{
-				Configuration: servingv1alpha1.ConfigurationSpec{
-					RevisionTemplate: servingv1alpha1.RevisionTemplateSpec{
+			ConfigurationSpec: &servingv1alpha1.ConfigurationSpec{
+				Template: servingv1alpha1.RevisionTemplateSpec{
 						Spec: servingv1alpha1.RevisionSpec{
-							ServiceAccountName: source.Spec.ServiceAccountName,
 							Container: corev1.Container{
 								Image: receiveAdapterImage,
 							},
 						},
-					},
-				},
 			},
 		},
 	}
