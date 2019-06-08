@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	servingv1alpha1 "github.com/knative/serving/pkg/apis/serving/v1alpha1"
+	servingv1v1beta1 "github.com/knative/serving/pkg/apis/serving/v1beta1"
 	tektonexperimentalv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
 )
 
@@ -40,13 +41,20 @@ func MakeService(source tektonexperimentalv1alpha1.EventBinding, receiveAdapterI
 			Labels:       labels,
 		},
 		Spec: servingv1alpha1.ServiceSpec{
-			ConfigurationSpec: &servingv1alpha1.ConfigurationSpec{
-				Template: servingv1alpha1.RevisionTemplateSpec{
-						Spec: servingv1alpha1.RevisionSpec{
-							Container: corev1.Container{
-								Image: receiveAdapterImage,
+			ConfigurationSpec: servingv1alpha1.ConfigurationSpec{
+				Template: &servingv1alpha1.RevisionTemplateSpec{
+					Spec: servingv1alpha1.RevisionSpec{
+						RevisionSpec: servingv1v1beta1.RevisionSpec{
+							PodSpec: corev1.PodSpec{
+								Containers: []corev1.Container{
+									{
+										Image: receiveAdapterImage,
+									},
+								},
 							},
 						},
+					},
+				},
 			},
 		},
 	}
