@@ -20,28 +20,35 @@ import (
 	"context"
 	"fmt"
 	"github.com/go-logr/logr"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	servingv1alpha1 "github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	tektonexperimentalv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
 	resources "github.com/vincent-pli/tekton-listener/controllers/resources"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // EventBindingReconciler reconciles a EventBinding object
 type EventBindingReconciler struct {
 	client.Client
-	Log logr.Logger
+	Log                  logr.Logger
 	listenerAdapterImage string
-	scheme *runtime.Scheme
+	scheme               *runtime.Scheme
+	recorder             record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=tektonexperimental.vincent-pli.com,resources=eventbindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tektonexperimental.vincent-pli.com,resources=eventbindings/status,verbs=get;update;patch
 
 func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	cxt := context.Background()
+	ctx := context.Background()
 	log := r.Log.WithValues("eventbinding", req.NamespacedName)
 
 	// your logic here
@@ -55,7 +62,7 @@ func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	}
 	log.Info("yyyyyyyyyyyy")
 	log.Info(eventBinding.Name)
-	
+
 	if eventBinding.DeletionTimestamp == nil {
 		return r.reconcile(ctx, eventBinding)
 	} else {
@@ -65,7 +72,7 @@ func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	return ctrl.Result{}, nil
 }
 
-func (r *EventBindingReconciler) reconcile(cxt ctx context.Context, source tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error)) {
+func (r *EventBindingReconciler) reconcile(ctx context.Context, source tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
 	ksvc, err := r.getOwnedService(ctx, source)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -73,7 +80,7 @@ func (r *EventBindingReconciler) reconcile(cxt ctx context.Context, source tekto
 			if err = controllerutil.SetControllerReference(source, ksvc, r.scheme); err != nil {
 				return ctrl.Result{}, err
 			}
-			if err = r.client.Create(ctx, ksvc); err != nil {
+			if err = r.Client.Create(ctx, ksvc); err != nil {
 				return ctrl.Result{}, err
 			}
 			r.recorder.Eventf(source, corev1.EventTypeNormal, "ServiceCreated", "Created Service %q", ksvc.Name)
@@ -90,21 +97,27 @@ func (r *EventBindingReconciler) reconcile(cxt ctx context.Context, source tekto
 	if routeCondition != nil && routeCondition.Status == corev1.ConditionTrue && receiveAdapterDomain != "" {
 		// TODO: Mark Deployed for the ksvc
 		// TODO: Mark some condition for the webhook status?
-		r.addFinalizer(source)
-		fmt.Println("ksvc is ready...");
+		r.addFinalizer.addFinalizer(source)
+		fmt.Println("ksvc is ready...")
 	} else {
 		return ctrl.Result{true, 10}, err
 	}
-	return ctrl.Result{} nil
+	return ctrl.Result{}, nil
 }
 
-func (r *EventBindingReconciler) finalize(cxt ctx context.Context, source tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
-	
+func (r *EventBindingReconciler) finalize(ctx context.Context, source tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
+	return ctrl.Result{}, nil
 }
 
-func (r *reconciler) getOwnedService(ctx context.Context, source tektonexperimentalv1alpha1.EventBinding) (*servingv1alpha1.Service, error) {
+func (r *EventBindingReconciler) addFinalizer(s tektonexperimentalv1alpha1.EventBinding) {
+	finalizers := sets.NewString(s.Finalizers...)
+	finalizers.Insert("tekton-listener-source-controlle")
+	s.Finalizers = finalizers.List()
+}
+
+func (r *EventBindingReconciler) getOwnedService(ctx context.Context, source tektonexperimentalv1alpha1.EventBinding) (*servingv1alpha1.Service, error) {
 	list := &servingv1alpha1.ServiceList{}
-	err := r.client.List(ctx, &client.ListOptions{
+	err := r.Client.List(ctx, &client.ListOptions{
 		Namespace:     source.Namespace,
 		LabelSelector: labels.Everything(),
 		// TODO this is here because the fake client needs it.

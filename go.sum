@@ -31,6 +31,8 @@ github.com/golang/protobuf v1.2.0 h1:P3YflyNX/ehuJFLhxviNdFxQPkGK5cDcApsge1SqnvM
 github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=
 github.com/google/go-cmp v0.3.0 h1:crn/baboCvb5fXaQ0IJ1SGTsTVrWpDsCWC8EGETZijY=
 github.com/google/go-cmp v0.3.0/go.mod h1:8QqcDgzrUqlUb/G2PQTWiueGozuR1884gddMywk6iLU=
+github.com/google/go-containerregistry v0.0.0-20190531175139-2687bd5ba651 h1:hYhlBjVCLlkgDMRa1wE1JB3ObGUj9OZjQu4b9xtythQ=
+github.com/google/go-containerregistry v0.0.0-20190531175139-2687bd5ba651/go.mod h1:yZAFP63pRshzrEYLXLGPmUt0Ay+2zdjmMN1loCnRLUk=
 github.com/google/gofuzz v0.0.0-20170612174753-24818f796faf h1:+RRA9JqSOZFfKrOeqr2z77+8R2RKyh8PG66dcu1V0ck=
 github.com/google/gofuzz v0.0.0-20170612174753-24818f796faf/go.mod h1:HP5RmnzzSNb993RKQDq4+1A4ia9nllfqcQFTQJedwGI=
 github.com/googleapis/gnostic v0.2.0 h1:l6N3VoaVzTncYYW+9yOz2LJJammFZGBO13sqgEhpy9g=
@@ -49,8 +51,12 @@ github.com/json-iterator/go v1.1.6 h1:MrUvLMLTMxbqFJ9kzlvat/rYZqZnW3u4wkLzWTaFwK
 github.com/json-iterator/go v1.1.6/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
 github.com/kisielk/errcheck v1.1.0/go.mod h1:EZBBE59ingxPouuu3KfxchcWSUPOHkagtvWXihfKN4Q=
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
+github.com/knative/build v0.6.0 h1:tAhqGbRL3/wFOfEc4srO8XDNV8DxUE+z6TzKW0JPWsE=
+github.com/knative/build v0.6.0/go.mod h1:/sU74ZQkwlYA5FwYDJhYTy61i/Kn+5eWfln2jDbw3Qo=
 github.com/knative/pkg v0.0.0-20190604144441-678bb6612d2c h1:ACVSMDj8imEE81iHx7dJv4jKVPshpFIccmySZnV5k+k=
 github.com/knative/pkg v0.0.0-20190604144441-678bb6612d2c/go.mod h1:7Ijfhw7rfB+H9VtosIsDYvZQ+qYTz7auK3fHW/5z4ww=
+github.com/knative/serving v0.6.0 h1:2SOr1jAvrUPO1y0mJvpiTe3bJTSMd2tKXflmHCM0MAA=
+github.com/knative/serving v0.6.0/go.mod h1:ljvMfwQy2qanaM/8xnBSK4Mz3Vv2NawC2fo5kFRJS1A=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=

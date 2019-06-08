@@ -18,8 +18,8 @@ package main
 
 import (
 	"flag"
-	"os"
 	"fmt"
+	"os"
 
 	tektonexperimentalv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
 	"github.com/vincent-pli/tekton-listener/controllers"
@@ -31,9 +31,10 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
-	setupLog = ctrl.Log.WithName("setup")
-	lsImageEnvVar = "LS_IMAGE"
+	scheme              = runtime.NewScheme()
+	setupLog            = ctrl.Log.WithName("setup")
+	lsImageEnvVar       = "LS_IMAGE"
+	controllerAgentName = "tekton-listener-source-controller"
 )
 
 func init() {
@@ -70,10 +71,11 @@ func main() {
 	}
 
 	err = (&controllers.EventBindingReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("EventBinding"),
-		listenerAdapterImage: listenerAdapterImage
-		schema: scheme
+		Client:               mgr.GetClient(),
+		Log:                  ctrl.Log.WithName("controllers").WithName("EventBinding"),
+		listenerAdapterImage: listenerAdapterImage,
+		schema:               scheme,
+		recorder:             mgr.GetRecorder(controllerAgentName),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EventBinding")
