@@ -67,6 +67,8 @@ type EventBindingStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 }
 
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // EventBinding is the Schema for the eventbindings API
 type EventBinding struct {
@@ -77,6 +79,7 @@ type EventBinding struct {
 	Status EventBindingStatus `json:"status,omitempty"`
 }
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 
 // EventBindingList contains a list of EventBinding

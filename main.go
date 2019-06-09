@@ -67,15 +67,15 @@ func main() {
 
 	listenerAdapterImage, defined := os.LookupEnv(lsImageEnvVar)
 	if !defined {
-		return fmt.Errorf("required environment variable %q not defined", lsImageEnvVar)
+		err = fmt.Errorf("required environment variable %q not defined", lsImageEnvVar)
 	}
 
 	err = (&controllers.EventBindingReconciler{
 		Client:               mgr.GetClient(),
 		Log:                  ctrl.Log.WithName("controllers").WithName("EventBinding"),
-		listenerAdapterImage: listenerAdapterImage,
-		schema:               scheme,
-		recorder:             mgr.GetRecorder(controllerAgentName),
+		ListenerAdapterImage: listenerAdapterImage,
+		Scheme:               scheme,
+		Recorder:             mgr.GetEventRecorderFor(controllerAgentName),
 	}).SetupWithManager(mgr)
 	if err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EventBinding")

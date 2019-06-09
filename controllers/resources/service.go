@@ -28,7 +28,7 @@ import (
 
 // MakeService generates, but does not create, a Service for the given
 // GitLabSource.
-func MakeService(source tektonexperimentalv1alpha1.EventBinding, receiveAdapterImage string) *servingv1alpha1.Service {
+func MakeService(source *tektonexperimentalv1alpha1.EventBinding, receiveAdapterImage string) *servingv1alpha1.Service {
 	labels := map[string]string{
 		"listener-adapter": "normal",
 	}
