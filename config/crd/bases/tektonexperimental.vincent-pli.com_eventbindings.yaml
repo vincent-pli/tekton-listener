@@ -384,6 +384,48 @@ spec:
               type: string
           type: object
         spec:
+          properties:
+            event:
+              properties:
+                class:
+                  description: Class of Cloudevent
+                  type: string
+                type:
+                  description: Type of Cloudevent
+                  type: string
+              type: object
+            params:
+              items:
+                properties:
+                  name:
+                    type: string
+                  value:
+                    type: string
+                required:
+                - name
+                - value
+                type: object
+              type: array
+            serviceAccountName:
+              description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                Important: Run "make" to regenerate code after modifying this file
+                ServiceAccountName holds the name of the Kubernetes service account
+                as which the underlying K8s resources should be run. If unspecified
+                this will default to the "default" service account for the namespace
+                in which the GitLabSource exists.'
+              type: string
+            templateRef:
+              properties:
+                apiVersion:
+                  description: API version of the referent
+                  type: string
+                name:
+                  description: Name of the referent
+                  type: string
+              type: object
+          required:
+          - templateRef
+          - event
           type: object
         status:
           type: object

@@ -62,13 +62,10 @@ func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	log.Info("yyyyyyyyyyyy")
 	log.Info(eventBinding.Name)
 
-	if eventBinding.DeletionTimestamp == nil {
-		return r.reconcile(ctx, &eventBinding)
-	} else {
+	if eventBinding.DeletionTimestamp != nil {
 		return r.finalize(ctx, &eventBinding)
 	}
-
-	return ctrl.Result{}, nil
+	return r.reconcile(ctx, &eventBinding)
 }
 
 func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
@@ -99,7 +96,7 @@ func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonex
 		r.addFinalizer(source)
 		fmt.Println("ksvc is ready...")
 	} else {
-		return ctrl.Result{true, 10}, err
+		return ctrl.Result{Requeue: true, RequeueAfter: 10}, err
 	}
 	return ctrl.Result{}, nil
 }
