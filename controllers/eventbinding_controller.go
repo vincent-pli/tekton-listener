@@ -64,13 +64,10 @@ func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	log.Info(eventBinding.Name)
 
 	var reconcileErr error
-	if eventBinding.DeletionTimestamp == nil {
-		reconcileErr = r.reconcile(ctx, &eventBinding)
-	} else {
+	if eventBinding.DeletionTimestamp != nil {
 		reconcileErr = r.finalize(ctx, &eventBinding)
 	}
-
-	return ctrl.Result{}, reconcileErr
+	return r.reconcile(ctx, &eventBinding)
 }
 
 func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
@@ -79,18 +76,18 @@ func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonex
 		if apierrors.IsNotFound(err) {
 			ksvc = resources.MakeService(source, r.ListenerAdapterImage)
 			if err = controllerutil.SetControllerReference(source, ksvc, r.Scheme); err != nil {
-				return err
+				return ctrl.Result{}, err
 			}
 			if err = r.Client.Create(ctx, ksvc); err != nil {
-				return err
+				return ctrl.Result{}, err
 			}
 			r.Recorder.Eventf(source, corev1.EventTypeNormal, "ServiceCreated", "Created Service %q", ksvc.Name)
 			// TODO: Mark Deploying for the ksvc
 			// Wait for the Service to get a status
-			return nil
+			return ctrl.Result{}, nil
 		}
 		// Error was something other than NotFound
-		return err
+		return ctrl.Result{}, err
 	}
 
 	routeCondition := ksvc.Status.GetCondition(servingv1alpha1.ServiceConditionRoutesReady)
@@ -103,7 +100,7 @@ func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonex
 	} else {
 		return ctrl.Result{Requeue: true, RequeueAfter: 10}, err
 	}
-	return nil
+	return ctrl.Result{}, nil
 }
 
 func (r *EventBindingReconciler) finalize(ctx context.Context, source *tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
