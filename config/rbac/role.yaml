@@ -27,6 +27,26 @@ rules:
   - update
   - patch
 - apiGroups:
+  - serving.knative.dev
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - serving.knative.dev
+  resources:
+  - services/status
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
   - tektonexperimental.vincent-pli.com
   resources:
   - listenertemplates

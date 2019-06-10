@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	servingv1alpha1 "github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	tektonexperimentalv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
 	"github.com/vincent-pli/tekton-listener/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,6 +41,7 @@ var (
 func init() {
 
 	tektonexperimentalv1alpha1.AddToScheme(scheme)
+	servingv1alpha1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 }
 

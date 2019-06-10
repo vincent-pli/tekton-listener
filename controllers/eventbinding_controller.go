@@ -46,6 +46,8 @@ type EventBindingReconciler struct {
 
 // +kubebuilder:rbac:groups=tektonexperimental.vincent-pli.com,resources=eventbindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tektonexperimental.vincent-pli.com,resources=eventbindings/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=serving.knative.dev,resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=serving.knative.dev,resources=services/status,verbs=get;update;patch
 
 func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
@@ -63,9 +65,8 @@ func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	log.Info("yyyyyyyyyyyy")
 	log.Info(eventBinding.Name)
 
-	var reconcileErr error
 	if eventBinding.DeletionTimestamp != nil {
-		reconcileErr = r.finalize(ctx, &eventBinding)
+		return r.finalize(ctx, &eventBinding)
 	}
 	return r.reconcile(ctx, &eventBinding)
 }

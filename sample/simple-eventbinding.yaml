@@ -1,0 +1,21 @@
+apiVersion: tektonexperimental.vincent-pli.com/v1alpha1
+kind: EventBinding
+metadata:
+  name: simple-pipeline-push
+  namespace: tekton-listener-system
+spec:
+  templateRef:
+    name: simple-pipeline-template
+  serviceAccount: default
+  event:
+    class: cloudevent
+    type: com.github.push
+  params:
+    - name: gitrevision
+      value: ${event.head_commit.id}
+    - name: gitrepositoryurl
+      value: ${event.repository.url}
+    - name: dockerusername
+      value: ncskier
+    - name: dockerappname
+      value: helloworldapp
