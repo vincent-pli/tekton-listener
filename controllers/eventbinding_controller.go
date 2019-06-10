@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+
 	"github.com/go-logr/logr"
 	servingv1alpha1 "github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	tektonexperimentalv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
@@ -62,10 +63,14 @@ func (r *EventBindingReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	log.Info("yyyyyyyyyyyy")
 	log.Info(eventBinding.Name)
 
-	if eventBinding.DeletionTimestamp != nil {
-		return r.finalize(ctx, &eventBinding)
+	var reconcileErr error
+	if eventBinding.DeletionTimestamp == nil {
+		reconcileErr = r.reconcile(ctx, &eventBinding)
+	} else {
+		reconcileErr = r.finalize(ctx, &eventBinding)
 	}
-	return r.reconcile(ctx, &eventBinding)
+
+	return ctrl.Result{}, reconcileErr
 }
 
 func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
@@ -74,18 +79,18 @@ func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonex
 		if apierrors.IsNotFound(err) {
 			ksvc = resources.MakeService(source, r.ListenerAdapterImage)
 			if err = controllerutil.SetControllerReference(source, ksvc, r.Scheme); err != nil {
-				return ctrl.Result{}, err
+				return err
 			}
 			if err = r.Client.Create(ctx, ksvc); err != nil {
-				return ctrl.Result{}, err
+				return err
 			}
 			r.Recorder.Eventf(source, corev1.EventTypeNormal, "ServiceCreated", "Created Service %q", ksvc.Name)
 			// TODO: Mark Deploying for the ksvc
 			// Wait for the Service to get a status
-			return ctrl.Result{}, nil
+			return nil
 		}
 		// Error was something other than NotFound
-		return ctrl.Result{}, err
+		return err
 	}
 
 	routeCondition := ksvc.Status.GetCondition(servingv1alpha1.ServiceConditionRoutesReady)
@@ -98,16 +103,26 @@ func (r *EventBindingReconciler) reconcile(ctx context.Context, source *tektonex
 	} else {
 		return ctrl.Result{Requeue: true, RequeueAfter: 10}, err
 	}
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *EventBindingReconciler) finalize(ctx context.Context, source *tektonexperimentalv1alpha1.EventBinding) (ctrl.Result, error) {
+	// Always remove the finalizer. If there's a failure cleaning up, an event
+	// will be recorded allowing the webhook to be removed manually by the
+	// operator.
+	r.removeFinalizer(source)
 	return ctrl.Result{}, nil
 }
 
 func (r *EventBindingReconciler) addFinalizer(s *tektonexperimentalv1alpha1.EventBinding) {
 	finalizers := sets.NewString(s.Finalizers...)
 	finalizers.Insert("tekton-listener-source-controlle")
+	s.Finalizers = finalizers.List()
+}
+
+func (r *EventBindingReconciler) removeFinalizer(s *tektonexperimentalv1alpha1.EventBinding) {
+	finalizers := sets.NewString(s.Finalizers...)
+	finalizers.Delete("tekton-listener-source-controlle")
 	s.Finalizers = finalizers.List()
 }
 
