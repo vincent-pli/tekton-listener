@@ -19,6 +19,7 @@ package resources
 import (
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	servingv1alpha1 "github.com/knative/serving/pkg/apis/serving/v1alpha1"
@@ -28,7 +29,7 @@ import (
 
 // MakeService generates, but does not create, a Service for the given
 // GitLabSource.
-func MakeService(source *tektonexperimentalv1alpha1.EventBinding, receiveAdapterImage string) *servingv1alpha1.Service {
+func MakeService(source *tektonexperimentalv1alpha1.EventBinding, listenerAdapterImage string) *servingv1alpha1.Service {
 	labels := map[string]string{
 		"listener-adapter": "normal",
 	}
@@ -43,7 +44,16 @@ func MakeService(source *tektonexperimentalv1alpha1.EventBinding, receiveAdapter
 			ConfigurationSpec: servingv1alpha1.ConfigurationSpec{
 				Template: &servingv1alpha1.RevisionTemplateSpec{
 					Spec: servingv1alpha1.RevisionSpec{
-						RevisionSpec: servingv1v1beta1.RevisionSpec{},
+						RevisionSpec: servingv1v1beta1.RevisionSpec{
+							PodSpec: servingv1v1beta1.PodSpec{
+								ServiceAccountName: source.Spec.ServiceAccountName,
+								Containers: []corev1.Container{
+									{
+										Image: listenerAdapterImage,
+									},
+								},
+							},
+						},
 					},
 				},
 			},
