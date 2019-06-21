@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	GLHeaderEvent    = "GitLab-Event"
+	GLHeaderEvent    = "GitLab-Event1"
 	GLHeaderDelivery = "GitLab-Delivery"
 )
 
