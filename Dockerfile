@@ -12,6 +12,7 @@ COPY go.sum go.sum
 
 
 # Build
+ENV GO111MODULE=on
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o manager main.go
 
 # Use distroless as minimal base image to package the manager binary

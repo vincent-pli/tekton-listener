@@ -1,6 +1,7 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= vincentpli/listener:latest
+IMG ?= vincentpli/listener-controller:latest
+IMG-LISTENER ?= vincentpli/listener:latest
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true"
 
@@ -50,9 +51,17 @@ docker-build: test
 	@echo "updating kustomize image patch file for manager resource"
 	sed -i'' -e 's@image: .*@image: '"${IMG}"'@' ./config/default/manager_image_patch.yaml
 
+# Build the docker image for listener
+docker-build-listener:
+	docker build . -f Dockerfile.listener -t ${IMG-LISTENER}
+	@echo "updating kustomize image patch file for manager resource"
+	sed -i'' -e 's@value: .*@value: '"${IMG-LISTENER}"'@' ./config/default/manager_image_patch.yaml
+
+
 # Push the docker image
 docker-push:
 	docker push ${IMG}
+	docker push ${IMG-LISTENER}
 
 # find or download controller-gen
 # download controller-gen if necessary

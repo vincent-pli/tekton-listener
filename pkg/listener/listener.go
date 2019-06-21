@@ -21,13 +21,13 @@ import (
 
 	tektoncdclientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
 	//"github.com/knative/eventing-sources/pkg/kncloudevents"
-	"k8s.io/client-go/rest"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"github.com/go-logr/logr"
 	"github.com/kubernetes-sigs/controller-runtime/pkg/client"
 	tektonlistenerv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 const (
@@ -36,14 +36,14 @@ const (
 )
 
 var (
-	scheme              = runtime.NewScheme()
+	scheme = runtime.NewScheme()
 )
 
 // Adapter converts incoming GitLab webhook events to CloudEvents
 type Listener struct {
-	tektonClient   tektoncdclientset.Interface
-	client client.Client
-	Log                  logr.Logger
+	tektonClient tektoncdclientset.Interface
+	client       client.Client
+	Log          logr.Logger
 }
 
 // New creates an adapter to convert incoming GitLab webhook events to CloudEvents and
@@ -53,7 +53,7 @@ func New() (*Listener, error) {
 	l := new(Listener)
 
 	ctrl.SetLogger(zap.Logger(true))
-        l.Log = ctrl.Log.WithName("kvs").WithName("Listener")
+	l.Log = ctrl.Log.WithName("kvs").WithName("Listener")
 
 	// Get cluster config
 	config, err := rest.InClusterConfig()
@@ -63,17 +63,17 @@ func New() (*Listener, error) {
 	}
 
 	// Setup dynamic client
-	l.client, err = client.New(ctrl.GetConfigOrDie(), client.Options{scheme, nil})
+	l.client, err = client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme, Mapper: nil})
 	if err != nil {
 		l.Log.Error(err, "error create run-time client.")
-                return nil, err
+		return nil, err
 	}
 
 	// Setup tektoncd client
 	l.tektonClient, err = tektoncdclientset.NewForConfig(config)
 	if err != nil {
 		l.Log.Error(err, "error create tekton client.")
-                return nil, err
+		return nil, err
 	}
 
 	return l, nil
@@ -91,9 +91,7 @@ func (l *Listener) handleEvent(payload interface{}) error {
 	l.Log.Info("xxxxxxxxxxxxxxxxxxxxxx")
 	// parse event? should event be parsed in main or here?
 
-
 	// get EventBinding and ListenerTemplate for event binding and Kind parse
-
 
 	// Create PipelineResource and PipelineRun
 	return nil
