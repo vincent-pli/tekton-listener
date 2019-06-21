@@ -15,11 +15,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	event := map[string]interface{}{}
 
 	body, _ := ioutil.ReadAll(r.Body)
-	if err := json.Unmarshal(body, &msg); err != nil {
+	if err := json.Unmarshal(body, &event); err != nil {
 		return
 	}
 
-	l := listener.New()
+	l, err := listener.New()
+	if err != nil {
+		fmt.Println("Err, Err")
+	}
 	l.HandleEvent(event)
 }
 

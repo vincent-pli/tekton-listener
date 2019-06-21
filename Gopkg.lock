@@ -20,6 +20,12 @@
   version = "v1.0.0"
 
 [[projects]]
+  name = "github.com/cloudevents/sdk-go"
+  packages = [".","pkg/cloudevents","pkg/cloudevents/client","pkg/cloudevents/codec","pkg/cloudevents/context","pkg/cloudevents/datacodec","pkg/cloudevents/datacodec/json","pkg/cloudevents/datacodec/xml","pkg/cloudevents/observability","pkg/cloudevents/transport","pkg/cloudevents/transport/http","pkg/cloudevents/types"]
+  revision = "56931988abe3adf6792b5c6e575ee5f573e9ccbc"
+  version = "0.7.0"
+
+[[projects]]
   name = "github.com/davecgh/go-spew"
   packages = ["spew"]
   revision = "8991bc29aa16c548c550c7ff78260e27b9ab7c73"
@@ -168,6 +174,12 @@
   version = "v0.6.0"
 
 [[projects]]
+  name = "github.com/knative/eventing-sources"
+  packages = ["pkg/kncloudevents"]
+  revision = "b6cdf390669a28bc0d6808476851e2a34aa94305"
+  version = "v0.6.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/knative/pkg"
   packages = ["apis","apis/duck","apis/duck/v1alpha1","apis/duck/v1beta1","configmap","kmeta","kmp","ptr"]
@@ -178,6 +190,12 @@
   packages = ["pkg/apis/autoscaling","pkg/apis/config","pkg/apis/networking","pkg/apis/networking/v1alpha1","pkg/apis/serving","pkg/apis/serving/v1alpha1","pkg/apis/serving/v1beta1"]
   revision = "0800b94fd42981b439f6a54b0c0cbedd23e58c32"
   version = "v0.6.0"
+
+[[projects]]
+  name = "github.com/kubernetes-sigs/controller-runtime"
+  packages = ["pkg/client"]
+  revision = "f1eaba5087d69cebb154c6a48193e6667f5b512c"
+  version = "v0.1.12"
 
 [[projects]]
   name = "github.com/markbates/inflect"
@@ -283,9 +301,15 @@
 
 [[projects]]
   name = "github.com/tektoncd/pipeline"
-  packages = ["pkg/apis/pipeline","pkg/apis/pipeline/v1alpha1","pkg/list","pkg/merge","pkg/names","pkg/templating"]
+  packages = ["pkg/apis/pipeline","pkg/apis/pipeline/v1alpha1","pkg/client/clientset/versioned","pkg/client/clientset/versioned/scheme","pkg/client/clientset/versioned/typed/pipeline/v1alpha1","pkg/list","pkg/merge","pkg/names","pkg/templating"]
   revision = "9c52c698022faef09311093b1621b17cf903a8c0"
   version = "v0.4.0"
+
+[[projects]]
+  name = "go.opencensus.io"
+  packages = [".","internal","internal/tagencoding","metric/metricdata","metric/metricproducer","resource","stats","stats/internal","stats/view","tag","trace","trace/internal","trace/tracestate"]
+  revision = "9c377598961b706d1542bd2d84d538b5094d596e"
+  version = "v0.22.0"
 
 [[projects]]
   name = "go.uber.org/atomic"
@@ -453,6 +477,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "763d937016d26891b752a1570cefdc91b839ec06c4c81a19b627a7e93ad5da3e"
+  inputs-digest = "52cfedaea2fccd230f01d50643a267b1234f7e46295b793cffbfae00b9a657e7"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -17,20 +17,17 @@ limitations under the License.
 package listener
 
 import (
-	"context"
-	"fmt"
 	"log"
-	"net/http"
-	"strings"
 
 	tektoncdclientset "github.com/tektoncd/pipeline/pkg/client/clientset/versioned"
-	"github.com/knative/eventing-sources/pkg/kncloudevents"
+	//"github.com/knative/eventing-sources/pkg/kncloudevents"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"github.com/kubernetes-sigs/controller-runtime/pkg/client"
 	tektonlistenerv1alpha1 "github.com/vincent-pli/tekton-listener/api/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 const (
@@ -45,7 +42,7 @@ var (
 // Adapter converts incoming GitLab webhook events to CloudEvents
 type Listener struct {
 	tektonClient   tektoncdclientset.Interface
-	client client
+	client client.Client
 	Log                  logr.Logger
 }
 
@@ -55,35 +52,36 @@ func New() (*Listener, error) {
 	tektonlistenerv1alpha1.AddToScheme(scheme)
 	l := new(Listener)
 
+	ctrl.SetLogger(zap.Logger(true))
+        l.Log = ctrl.Log.WithName("kvs").WithName("Listener")
+
 	// Get cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		logging.Log.Errorf("error getting in cluster config: %s.", err.Error())
-		return Resource{}, err
+		l.Log.Error(err, "error getting in cluster config.")
+		return nil, err
 	}
 
 	// Setup dynamic client
-	l.client, err := client.New(config.GetConfigOrDie(), client.Options{scheme, {}})
+	l.client, err = client.New(ctrl.GetConfigOrDie(), client.Options{scheme, nil})
 	if err != nil {
-		fmt.Println("failed to create client")
-		os.Exit(1)
+		l.Log.Error(err, "error create run-time client.")
+                return nil, err
 	}
 
 	// Setup tektoncd client
-	l.tektonClient, err := tektoncdclientset.NewForConfig(config)
+	l.tektonClient, err = tektoncdclientset.NewForConfig(config)
 	if err != nil {
-		logging.Log.Errorf("error building tekton clientset: %s.", err.Error())
-		return Resource{}, err
+		l.Log.Error(err, "error create tekton client.")
+                return nil, err
 	}
 
-	ctrl.SetLogger(zap.Logger(true))
-	l.log = ctrl.Log.WithName("kvs").WithName("Listener")
 	return l, nil
 }
 
 // HandleEvent is invoked whenever an event comes in from GitLab
 func (l *Listener) HandleEvent(payload interface{}) {
-	err := a.handleEvent(payload)
+	err := l.handleEvent(payload)
 	if err != nil {
 		log.Printf("unexpected error handling GitLab event: %s", err)
 	}
@@ -91,7 +89,6 @@ func (l *Listener) HandleEvent(payload interface{}) {
 
 func (l *Listener) handleEvent(payload interface{}) error {
 	l.Log.Info("xxxxxxxxxxxxxxxxxxxxxx")
-	l.Log.Info(payload)
 	// parse event? should event be parsed in main or here?
 
 
@@ -99,5 +96,5 @@ func (l *Listener) handleEvent(payload interface{}) error {
 
 
 	// Create PipelineResource and PipelineRun
-
+	return nil
 }
