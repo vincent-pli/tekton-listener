@@ -27,5 +27,9 @@ func (eb *EventBinding) Validate(ctx context.Context) *apis.FieldError {
 	/*if err := validateObjectMetadata(p.GetObjectMeta()); err != nil {
 		return err.ViaField("metadata")
 	}*/
-	return nil
+	//return nil
+			return &apis.FieldError{
+			Message: "Invalid resource name: special character . must not be present",
+			Paths:   []string{"name"},
+		}
 }

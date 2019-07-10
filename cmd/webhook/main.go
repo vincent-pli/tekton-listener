@@ -78,7 +78,7 @@ func main() {
 	options := webhook.ControllerOptions{
 		ServiceName:    "tekton-trigger-webhook",
 		DeploymentName: "tekton-trigger-webhook",
-		Namespace:      system.GetNamespace(),
+		Namespace:      "tekton-listener-system",
 		Port:           8443,
 		SecretName:     "webhook-certs",
 		WebhookName:    "webhook.tekton.dev",

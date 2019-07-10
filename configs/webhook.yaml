@@ -16,7 +16,7 @@ apiVersion: apps/v1beta1
 kind: Deployment
 metadata:
   name: tekton-trigger-webhook
-  namespace: tekton-pipelines
+  namespace: tekton-listener-system
 spec:
   replicas: 1
   template:
@@ -26,7 +26,7 @@ spec:
       labels:
         app: tekton-trigger-webhook
     spec:
-      serviceAccountName: tekton-pipelines-controller
+            #serviceAccountName: tekton-pipelines-controller
       containers:
       - name: webhook
         image: github.com/vincent-pli/tekton-listener/cmd/webhook
