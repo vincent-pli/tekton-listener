@@ -1,4 +1,4 @@
-// Copyright 2019q The Go Authors. All rights reserved.
+// Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -8,7 +8,6 @@ import (
 	"context"
 	"flag"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"io/ioutil"
 	"path/filepath"
@@ -26,16 +25,18 @@ import (
 // We hardcode the expected number of test cases to ensure that all tests
 // are being executed. If a test is added, this number must be changed.
 const (
-	ExpectedCompletionsCount       = 121
-	ExpectedCompletionSnippetCount = 14
+	ExpectedCompletionsCount       = 144
+	ExpectedCompletionSnippetCount = 15
 	ExpectedDiagnosticsCount       = 17
 	ExpectedFormatCount            = 5
 	ExpectedImportCount            = 2
-	ExpectedDefinitionsCount       = 35
+	ExpectedDefinitionsCount       = 38
 	ExpectedTypeDefinitionsCount   = 2
 	ExpectedHighlightsCount        = 2
+	ExpectedReferencesCount        = 4
+	ExpectedRenamesCount           = 12
 	ExpectedSymbolsCount           = 1
-	ExpectedSignaturesCount        = 20
+	ExpectedSignaturesCount        = 21
 	ExpectedLinksCount             = 2
 )
 
@@ -56,9 +57,11 @@ type Formats []span.Span
 type Imports []span.Span
 type Definitions map[span.Span]Definition
 type Highlights map[string][]span.Span
+type References map[span.Span][]span.Span
+type Renames map[span.Span]string
 type Symbols map[span.URI][]source.Symbol
 type SymbolsChildren map[string][]source.Symbol
-type Signatures map[span.Span]source.SignatureInformation
+type Signatures map[span.Span]*source.SignatureInformation
 type Links map[span.URI][]Link
 
 type Data struct {
@@ -72,6 +75,8 @@ type Data struct {
 	Imports            Imports
 	Definitions        Definitions
 	Highlights         Highlights
+	References         References
+	Renames            Renames
 	Symbols            Symbols
 	symbolsChildren    SymbolsChildren
 	Signatures         Signatures
@@ -90,6 +95,8 @@ type Tests interface {
 	Import(*testing.T, Imports)
 	Definition(*testing.T, Definitions)
 	Highlight(*testing.T, Highlights)
+	Reference(*testing.T, References)
+	Rename(*testing.T, Renames)
 	Symbol(*testing.T, Symbols)
 	SignatureHelp(*testing.T, Signatures)
 	Link(*testing.T, Links)
@@ -130,6 +137,8 @@ func Load(t testing.TB, exporter packagestest.Exporter, dir string) *Data {
 		CompletionSnippets: make(CompletionSnippets),
 		Definitions:        make(Definitions),
 		Highlights:         make(Highlights),
+		References:         make(References),
+		Renames:            make(Renames),
 		Symbols:            make(Symbols),
 		symbolsChildren:    make(SymbolsChildren),
 		Signatures:         make(Signatures),
@@ -186,7 +195,7 @@ func Load(t testing.TB, exporter packagestest.Exporter, dir string) *Data {
 	data.Config.Fset = token.NewFileSet()
 	data.Config.Context = context.Background()
 	data.Config.ParseFile = func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
-		return parser.ParseFile(fset, filename, src, parser.AllErrors|parser.ParseComments)
+		panic("ParseFile should not be called")
 	}
 
 	// Do a first pass to collect special markers for completion.
@@ -209,6 +218,8 @@ func Load(t testing.TB, exporter packagestest.Exporter, dir string) *Data {
 		"typdef":    data.collectTypeDefinitions,
 		"hover":     data.collectHoverDefinitions,
 		"highlight": data.collectHighlights,
+		"refs":      data.collectReferences,
+		"rename":    data.collectRenames,
 		"symbol":    data.collectSymbols,
 		"signature": data.collectSignatures,
 		"snippet":   data.collectCompletionSnippets,
@@ -287,6 +298,22 @@ func Run(t *testing.T, tests Tests, data *Data) {
 			t.Errorf("got %v highlights expected %v", len(data.Highlights), ExpectedHighlightsCount)
 		}
 		tests.Highlight(t, data.Highlights)
+	})
+
+	t.Run("References", func(t *testing.T) {
+		t.Helper()
+		if len(data.References) != ExpectedReferencesCount {
+			t.Errorf("got %v references expected %v", len(data.References), ExpectedReferencesCount)
+		}
+		tests.Reference(t, data.References)
+	})
+
+	t.Run("Renames", func(t *testing.T) {
+		t.Helper()
+		if len(data.Renames) != ExpectedRenamesCount {
+			t.Errorf("got %v renames expected %v", len(data.Renames), ExpectedRenamesCount)
+		}
+		tests.Rename(t, data.Renames)
 	})
 
 	t.Run("Symbols", func(t *testing.T) {
@@ -456,6 +483,14 @@ func (data *Data) collectHighlights(name string, rng span.Span) {
 	data.Highlights[name] = append(data.Highlights[name], rng)
 }
 
+func (data *Data) collectReferences(src span.Span, expected []span.Span) {
+	data.References[src] = expected
+}
+
+func (data *Data) collectRenames(src span.Span, newText string) {
+	data.Renames[src] = newText
+}
+
 func (data *Data) collectSymbols(name string, spn span.Span, kind string, parentName string) {
 	sym := source.Symbol{
 		Name:          name,
@@ -470,9 +505,13 @@ func (data *Data) collectSymbols(name string, spn span.Span, kind string, parent
 }
 
 func (data *Data) collectSignatures(spn span.Span, signature string, activeParam int64) {
-	data.Signatures[spn] = source.SignatureInformation{
+	data.Signatures[spn] = &source.SignatureInformation{
 		Label:           signature,
 		ActiveParameter: int(activeParam),
+	}
+	// Hardcode special case to test the lack of a signature.
+	if signature == "" && activeParam == 0 {
+		data.Signatures[spn] = nil
 	}
 }
 

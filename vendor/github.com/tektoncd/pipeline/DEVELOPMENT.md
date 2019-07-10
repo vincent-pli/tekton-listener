@@ -14,7 +14,7 @@
 1. [Set up a docker repository you can push to](https://github.com/knative/serving/blob/master/docs/setting-up-a-docker-registry.md)
 
 Then you can [iterate](#iterating) (including
-[runing the controllers with `ko`](#install-pipeline)).
+[running the controllers with `ko`](#install-pipeline)).
 
 ### Ramp up
 
@@ -91,20 +91,54 @@ configuring Kubernetes resources.
 ## Kubernetes cluster
 
 Docker for Desktop using an edge version has been proven to work for both
-developing and running Pipelines. Your Kubernetes version must be 1.11 or later.
+developing and running Pipelines. The recommended configuration is:
+
+- Kubernetes version 1.11 or later
+- 4 vCPU nodes (`n1-standard-4`)
+- Node autoscaling, up to 3 nodes
+- API scopes for cloud-platform
 
 To setup a cluster with GKE:
 
 1. [Install required tools and setup GCP project](https://github.com/knative/docs/blob/master/docs/install/Knative-with-GKE.md#before-you-begin)
    (You may find it useful to save the ID of the project in an environment
    variable (e.g. `PROJECT_ID`).
-1. [Create a GKE cluster](https://github.com/knative/docs/blob/master/docs/install/Knative-with-GKE.md#creating-a-kubernetes-cluster)
 
-Note that
-[the `--scopes` argument to `gcloud container cluster create`](https://cloud.google.com/sdk/gcloud/reference/container/clusters/create#--scopes)
-controls what GCP resources the cluster's default service account has access to;
-for example to give the default service account full access to your GCR
-registry, you can add `storage-full` to your `--scopes` arg.
+1. Create a GKE cluster (with `--cluster-version=latest` but you can use any
+   version 1.11 or later):
+
+   ```bash
+   export PROJECT_ID=my-gcp-project
+   export CLUSTER_NAME=mycoolcluster
+
+   gcloud container clusters create $CLUSTER_NAME \
+    --enable-autoscaling \
+    --min-nodes=1 \
+    --max-nodes=3 \
+    --scopes=cloud-platform \
+    --enable-basic-auth \
+    --no-issue-client-certificate \
+    --project=$PROJECT_ID \
+    --region=us-central1 \
+    --machine-type=n1-standard-4 \
+    --image-type=cos \
+    --num-nodes=1 \
+    --cluster-version=latest
+   ```
+
+   Note that
+   [the `--scopes` argument to `gcloud container cluster create`](https://cloud.google.com/sdk/gcloud/reference/container/clusters/create#--scopes)
+   controls what GCP resources the cluster's default service account has access
+   to; for example to give the default service account full access to your GCR
+   registry, you can add `storage-full` to your `--scopes` arg.
+
+1. Grant cluster-admin permissions to the current user:
+
+   ```bash
+   kubectl create clusterrolebinding cluster-admin-binding \
+   --clusterrole=cluster-admin \
+   --user=$(gcloud config get-value core/account)
+   ```
 
 ## Environment Setup
 
@@ -151,28 +185,19 @@ kubectl create clusterrolebinding cluster-admin-binding \
 
 ### Install in custom namespace
 
-1. To install into a different namespace you will need to modify resources in
-   the `./config` folder
-   - modify the `metadata.name`
-     [here](https://github.com/tektoncd/pipeline/blob/c1500fab83b09edadefb38bb8920a0c837d8f32b/config/100-namespace.yaml)
-     value to the desired namespace
-   - modify the `subjects.namespace`
-     [here](https://github.com/tektoncd/pipeline/blob/c1500fab83b09edadefb38bb8920a0c837d8f32b/config/201-clusterrolebinding.yaml#L21)
-     value to the desired namespace
-   - look up all the lines with the namespace `namespace: tekton-pipelines`, and
-     set the value to the desired namespace
-   - add `downwardapi` entry to webhook and controller `deployment` resources.
-     E.g. add the environment variable section from the code snippet below to
-     [controller](https://github.com/tektoncd/pipeline/blob/c1500fab83b09edadefb38bb8920a0c837d8f32b/config/controller.yaml#L29)
-     and
-     [webhook](https://github.com/tektoncd/pipeline/blob/c1500fab83b09edadefb38bb8920a0c837d8f32b/config/webhook.yaml#L32)
+1. To install into a different namespace you can use this script :
 
-```yaml
-env:
-  - name: SYSTEM_NAMESPACE
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.namespace
+```shell
+#!/usr/bin/env bash
+set -e
+
+# Set your target namespace here
+TARGET_NAMESPACE=new-target-namespace
+
+ko resolve -f config | sed -e '/kind: Namespace/!b;n;n;s/:.*/: '"${TARGET_NAMESPACE}"'/' | \
+    sed "s/namespace: tekton-pipelines$/namespace: ${TARGET_NAMESPACE}/" | \
+    kubectl apply -f-
+kubectl set env deployments --all SYSTEM_NAMESPACE=${TARGET_NAMESPACE} -n ${TARGET_NAMESPACE}
 ```
 
 ## Iterating
@@ -236,6 +261,9 @@ To look at the webhook logs, run:
 ```shell
 kubectl -n tekton-pipelines logs $(kubectl -n tekton-pipelines get pods -l app=tekton-pipelines-webhook -o name)
 ```
+
+To look at the logs for individual `TaskRuns` or `PipelineRuns`, see
+[docs on accessing logs](docs/logs.md).
 
 ## Adding new types
 

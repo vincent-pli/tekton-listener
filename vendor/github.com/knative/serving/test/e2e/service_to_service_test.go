@@ -24,14 +24,17 @@ import (
 	"testing"
 
 	pkgTest "github.com/knative/pkg/test"
+	"github.com/knative/pkg/test/logstream"
 	"github.com/knative/pkg/test/spoof"
 	"github.com/knative/serving/test"
+	v1a1test "github.com/knative/serving/test/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/knative/serving/pkg/reconciler/revision/resources/names"
 	routeconfig "github.com/knative/serving/pkg/reconciler/route/config"
-	. "github.com/knative/serving/pkg/reconciler/testing"
+
+	. "github.com/knative/serving/pkg/testing/v1alpha1"
 )
 
 const (
@@ -83,7 +86,7 @@ func testProxyToHelloworld(t *testing.T, clients *test.Clients, helloworldDomain
 
 	test.CleanupOnInterrupt(func() { test.TearDown(clients, names) })
 	defer test.TearDown(clients, names)
-	resources, err := test.CreateRunLatestServiceReady(t, clients, &names, &test.Options{
+	resources, err := v1a1test.CreateRunLatestServiceReady(t, clients, &names, &v1a1test.Options{
 		EnvVars: envVars,
 	})
 	if err != nil {
@@ -137,6 +140,9 @@ func testProxyToHelloworld(t *testing.T, clients *test.Clients, helloworldDomain
 // to helloworld app.
 func TestServiceToServiceCall(t *testing.T) {
 	t.Parallel()
+	cancel := logstream.Start(t)
+	defer cancel()
+
 	clients := Setup(t)
 
 	t.Log("Creating a Service for the helloworld test app.")
@@ -150,7 +156,7 @@ func TestServiceToServiceCall(t *testing.T) {
 
 	withInternalVisibility := WithServiceLabel(
 		routeconfig.VisibilityLabelKey, routeconfig.VisibilityClusterLocal)
-	resources, err := test.CreateRunLatestServiceReady(t, clients, &names, &test.Options{}, withInternalVisibility)
+	resources, err := v1a1test.CreateRunLatestServiceReady(t, clients, &names, &v1a1test.Options{}, withInternalVisibility)
 	if err != nil {
 		t.Fatalf("Failed to create initial Service: %v: %v", names.Service, err)
 	}
@@ -162,7 +168,7 @@ func TestServiceToServiceCall(t *testing.T) {
 		t.Fatalf("Route is missing .Status.Address: %#v", resources.Route.Status)
 	}
 	// Check that the target Route's Domain matches its cluster local address.
-	if want, got := resources.Route.Status.Address.Hostname, resources.Route.Status.URL.Host; got != want {
+	if want, got := resources.Route.Status.Address.URL, resources.Route.Status.URL; got.String() != want.String() {
 		t.Errorf("Route.Status.URL.Host = %v, want %v", got, want)
 	}
 	t.Logf("helloworld internal domain is %s.", resources.Route.Status.URL.Host)
@@ -180,6 +186,9 @@ func TestServiceToServiceCall(t *testing.T) {
 // we're waiting for target app to be scaled to zero
 func TestServiceToServiceCallFromZero(t *testing.T) {
 	t.Parallel()
+	cancel := logstream.Start(t)
+	defer cancel()
+
 	clients := Setup(t)
 
 	t.Log("Creating helloworld Service")
@@ -195,7 +204,7 @@ func TestServiceToServiceCallFromZero(t *testing.T) {
 	test.CleanupOnInterrupt(func() { test.TearDown(clients, helloWorldNames) })
 	defer test.TearDown(clients, helloWorldNames)
 
-	helloWorld, err := test.CreateRunLatestServiceReady(t, clients, &helloWorldNames, &test.Options{}, withInternalVisibility)
+	helloWorld, err := v1a1test.CreateRunLatestServiceReady(t, clients, &helloWorldNames, &v1a1test.Options{}, withInternalVisibility)
 	if err != nil {
 		t.Fatalf("Failed to create a service: %v", err)
 	}

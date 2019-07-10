@@ -23,44 +23,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/knative/serving/pkg/apis/serving/v1beta1"
-
 	. "github.com/knative/pkg/configmap/testing"
 )
-
-func TestTargetConcurrency(t *testing.T) {
-	c := &Config{
-		ContainerConcurrencyTargetPercentage: 0.5,
-		ContainerConcurrencyTargetDefault:    10.0,
-	}
-
-	tests := []struct {
-		name                 string
-		containerConcurrency v1beta1.RevisionContainerConcurrencyType
-		want                 float64
-	}{{
-		name:                 "default",
-		containerConcurrency: 0,
-		want:                 10.0,
-	}, {
-		name:                 "single",
-		containerConcurrency: 1,
-		want:                 0.5,
-	}, {
-		name:                 "multi",
-		containerConcurrency: 10,
-		want:                 5.0,
-	}}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got := c.TargetConcurrency(test.containerConcurrency)
-			if got != test.want {
-				t.Errorf("TargetConcurrency() = %v, want %v", got, test.want)
-			}
-		})
-	}
-}
 
 func TestNewConfig(t *testing.T) {
 	tests := []struct {
@@ -81,16 +45,41 @@ func TestNewConfig(t *testing.T) {
 			"panic-threshold-percentage":              "200",
 		},
 		want: &Config{
-			EnableScaleToZero:                    true,
-			ContainerConcurrencyTargetPercentage: 0.5,
-			ContainerConcurrencyTargetDefault:    10.0,
-			MaxScaleUpRate:                       1.0,
-			StableWindow:                         5 * time.Minute,
-			PanicWindow:                          10 * time.Second,
-			ScaleToZeroGracePeriod:               30 * time.Second,
-			TickInterval:                         2 * time.Second,
-			PanicWindowPercentage:                10.0,
-			PanicThresholdPercentage:             200.0,
+			EnableScaleToZero:                  true,
+			ContainerConcurrencyTargetFraction: 0.5,
+			ContainerConcurrencyTargetDefault:  10.0,
+			MaxScaleUpRate:                     1.0,
+			StableWindow:                       5 * time.Minute,
+			PanicWindow:                        10 * time.Second,
+			ScaleToZeroGracePeriod:             30 * time.Second,
+			TickInterval:                       2 * time.Second,
+			PanicWindowPercentage:              10.0,
+			PanicThresholdPercentage:           200.0,
+		},
+	}, {
+		name: "concurrencty target percentage as percent",
+		input: map[string]string{
+			"enable-scale-to-zero":                    "true",
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "50",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "5m",
+			"panic-window":                            "10s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		want: &Config{
+			EnableScaleToZero:                  true,
+			ContainerConcurrencyTargetFraction: 0.5,
+			ContainerConcurrencyTargetDefault:  10.0,
+			MaxScaleUpRate:                     1.0,
+			StableWindow:                       5 * time.Minute,
+			PanicWindow:                        10 * time.Second,
+			ScaleToZeroGracePeriod:             30 * time.Second,
+			TickInterval:                       2 * time.Second,
+			PanicWindowPercentage:              10.0,
+			PanicThresholdPercentage:           200.0,
 		},
 	}, {
 		name: "with toggles on",
@@ -106,16 +95,16 @@ func TestNewConfig(t *testing.T) {
 			"panic-threshold-percentage":              "200",
 		},
 		want: &Config{
-			EnableScaleToZero:                    true,
-			ContainerConcurrencyTargetPercentage: 0.5,
-			ContainerConcurrencyTargetDefault:    10.0,
-			MaxScaleUpRate:                       1.0,
-			StableWindow:                         5 * time.Minute,
-			PanicWindow:                          10 * time.Second,
-			ScaleToZeroGracePeriod:               30 * time.Second,
-			TickInterval:                         2 * time.Second,
-			PanicWindowPercentage:                10.0,
-			PanicThresholdPercentage:             200.0,
+			EnableScaleToZero:                  true,
+			ContainerConcurrencyTargetFraction: 0.5,
+			ContainerConcurrencyTargetDefault:  10.0,
+			MaxScaleUpRate:                     1.0,
+			StableWindow:                       5 * time.Minute,
+			PanicWindow:                        10 * time.Second,
+			ScaleToZeroGracePeriod:             30 * time.Second,
+			TickInterval:                       2 * time.Second,
+			PanicWindowPercentage:              10.0,
+			PanicThresholdPercentage:           200.0,
 		},
 	}, {
 		name: "with toggles on strange casing",
@@ -131,16 +120,16 @@ func TestNewConfig(t *testing.T) {
 			"panic-threshold-percentage":              "200",
 		},
 		want: &Config{
-			EnableScaleToZero:                    true,
-			ContainerConcurrencyTargetPercentage: 0.5,
-			ContainerConcurrencyTargetDefault:    10.0,
-			MaxScaleUpRate:                       1.0,
-			StableWindow:                         5 * time.Minute,
-			PanicWindow:                          10 * time.Second,
-			ScaleToZeroGracePeriod:               30 * time.Second,
-			TickInterval:                         2 * time.Second,
-			PanicWindowPercentage:                10.0,
-			PanicThresholdPercentage:             200.0,
+			EnableScaleToZero:                  true,
+			ContainerConcurrencyTargetFraction: 0.5,
+			ContainerConcurrencyTargetDefault:  10.0,
+			MaxScaleUpRate:                     1.0,
+			StableWindow:                       5 * time.Minute,
+			PanicWindow:                        10 * time.Second,
+			ScaleToZeroGracePeriod:             30 * time.Second,
+			TickInterval:                       2 * time.Second,
+			PanicWindowPercentage:              10.0,
+			PanicThresholdPercentage:           200.0,
 		},
 	}, {
 		name: "with toggles explicitly off",
@@ -156,15 +145,15 @@ func TestNewConfig(t *testing.T) {
 			"panic-threshold-percentage":              "200",
 		},
 		want: &Config{
-			ContainerConcurrencyTargetPercentage: 0.5,
-			ContainerConcurrencyTargetDefault:    10.0,
-			MaxScaleUpRate:                       1.0,
-			StableWindow:                         5 * time.Minute,
-			PanicWindow:                          10 * time.Second,
-			ScaleToZeroGracePeriod:               30 * time.Second,
-			TickInterval:                         2 * time.Second,
-			PanicWindowPercentage:                10.0,
-			PanicThresholdPercentage:             200.0,
+			ContainerConcurrencyTargetFraction: 0.5,
+			ContainerConcurrencyTargetDefault:  10.0,
+			MaxScaleUpRate:                     1.0,
+			StableWindow:                       5 * time.Minute,
+			PanicWindow:                        10 * time.Second,
+			ScaleToZeroGracePeriod:             30 * time.Second,
+			TickInterval:                       2 * time.Second,
+			PanicWindowPercentage:              10.0,
+			PanicThresholdPercentage:           200.0,
 		},
 	}, {
 		name: "with explicit grace period",
@@ -181,15 +170,15 @@ func TestNewConfig(t *testing.T) {
 			"panic-threshold-percentage":              "200",
 		},
 		want: &Config{
-			ContainerConcurrencyTargetPercentage: 0.5,
-			ContainerConcurrencyTargetDefault:    10.0,
-			MaxScaleUpRate:                       1.0,
-			StableWindow:                         5 * time.Minute,
-			PanicWindow:                          10 * time.Second,
-			ScaleToZeroGracePeriod:               30 * time.Second,
-			TickInterval:                         2 * time.Second,
-			PanicWindowPercentage:                10.0,
-			PanicThresholdPercentage:             200.0,
+			ContainerConcurrencyTargetFraction: 0.5,
+			ContainerConcurrencyTargetDefault:  10.0,
+			MaxScaleUpRate:                     1.0,
+			StableWindow:                       5 * time.Minute,
+			PanicWindow:                        10 * time.Second,
+			ScaleToZeroGracePeriod:             30 * time.Second,
+			TickInterval:                       2 * time.Second,
+			PanicWindowPercentage:              10.0,
+			PanicThresholdPercentage:           200.0,
 		},
 	}, {
 		name: "malformed float",
@@ -214,6 +203,124 @@ func TestNewConfig(t *testing.T) {
 			"panic-window":                            "10s",
 			"tick-interval":                           "2s",
 			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "invalid target %, too small",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "-42",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "30s",
+			"panic-window":                            "10s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "invalid target %, too big",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "142.4",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "30s",
+			"panic-window":                            "10s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "target capacity less than 1",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "30.0",
+			"container-concurrency-target-default":    "2",
+			"stable-window":                           "30s",
+			"panic-window":                            "10s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "stable window too small",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "0.5",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "1s",
+			"panic-window":                            "10s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "panic window too small",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "0.5",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "12s",
+			"panic-window":                            "500ms",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "panic window too big",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "0.5",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "12s",
+			"panic-window":                            "13s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "panic window percentage too small",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "0.5",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "12s",
+			"panic-window":                            "5s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "10", // 1.2s < BucketSize
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "panic window percentage too big",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "0.5",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "12s",
+			"panic-window":                            "3s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "110",
+			"panic-threshold-percentage":              "200",
+		},
+		wantErr: true,
+	}, {
+		name: "grace window too big",
+		input: map[string]string{
+			"max-scale-up-rate":                       "1.0",
+			"container-concurrency-target-percentage": "0.5",
+			"container-concurrency-target-default":    "10.0",
+			"stable-window":                           "12s",
+			"panic-window":                            "3s",
+			"scale-to-zero-grace-period":              "4s",
+			"tick-interval":                           "2s",
+			"panic-window-percentage":                 "50",
 			"panic-threshold-percentage":              "200",
 		},
 		wantErr: true,

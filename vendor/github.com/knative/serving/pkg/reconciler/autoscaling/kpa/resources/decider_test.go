@@ -25,8 +25,9 @@ import (
 	"github.com/knative/serving/pkg/apis/autoscaling"
 	"github.com/knative/serving/pkg/apis/autoscaling/v1alpha1"
 	"github.com/knative/serving/pkg/autoscaler"
-	. "github.com/knative/serving/pkg/reconciler/testing"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	. "github.com/knative/serving/pkg/testing"
 )
 
 func TestMakeDecider(t *testing.T) {
@@ -114,10 +115,7 @@ func decider(options ...DeciderOption) *autoscaler.Decider {
 			TickInterval:      config.TickInterval,
 			TargetConcurrency: float64(100),
 			PanicThreshold:    float64(200),
-			MetricSpec: autoscaler.MetricSpec{
-				StableWindow: config.StableWindow,
-				PanicWindow:  config.PanicWindow,
-			},
+			StableWindow:      config.StableWindow,
 		},
 	}
 	for _, fn := range options {
@@ -158,14 +156,14 @@ func withPanicThresholdPercentageAnnotation(percentage string) DeciderOption {
 }
 
 var config = &autoscaler.Config{
-	EnableScaleToZero:                    true,
-	ContainerConcurrencyTargetPercentage: 1.0,
-	ContainerConcurrencyTargetDefault:    100.0,
-	MaxScaleUpRate:                       10.0,
-	StableWindow:                         60 * time.Second,
-	PanicThresholdPercentage:             200,
-	PanicWindow:                          6 * time.Second,
-	PanicWindowPercentage:                10,
-	TickInterval:                         2 * time.Second,
-	ScaleToZeroGracePeriod:               30 * time.Second,
+	EnableScaleToZero:                  true,
+	ContainerConcurrencyTargetFraction: 1.0,
+	ContainerConcurrencyTargetDefault:  100.0,
+	MaxScaleUpRate:                     10.0,
+	StableWindow:                       60 * time.Second,
+	PanicThresholdPercentage:           200,
+	PanicWindow:                        6 * time.Second,
+	PanicWindowPercentage:              10,
+	TickInterval:                       2 * time.Second,
+	ScaleToZeroGracePeriod:             30 * time.Second,
 }

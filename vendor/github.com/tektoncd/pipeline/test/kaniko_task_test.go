@@ -29,6 +29,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	knativetest "github.com/knative/pkg/test"
+	"golang.org/x/xerrors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,7 +41,6 @@ const (
 	kanikoTaskName     = "kanikotask"
 	kanikoTaskRunName  = "kanikotask-run"
 	kanikoResourceName = "go-example-git"
-	kanikoBuildOutput  = "Build successful"
 )
 
 func getGitResource(namespace string) *v1alpha1.PipelineResource {
@@ -133,10 +133,6 @@ func TestKanikoTaskRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected to get logs from pod %s: %v", podName, err)
 	}
-	// check the logs contain our success criteria
-	if !strings.Contains(logs, kanikoBuildOutput) {
-		t.Fatalf("Expected output %s from pod %s but got %s", kanikoBuildOutput, podName, logs)
-	}
 	// make sure the pushed digest matches the one we pushed
 	re := regexp.MustCompile(`digest: (sha256:\w+)`)
 	match := re.FindStringSubmatch(logs)
@@ -192,15 +188,15 @@ func getAllLogsFromPod(c kubernetes.Interface, pod, namespace string) (string, e
 func getRemoteDigest(image string) (string, error) {
 	ref, err := name.ParseReference(image, name.WeakValidation)
 	if err != nil {
-		return "", fmt.Errorf("could not parse image reference %q: %v", image, err)
+		return "", xerrors.Errorf("could not parse image reference %q: %w", image, err)
 	}
 	img, err := remote.Image(ref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	if err != nil {
-		return "", fmt.Errorf("could not pull remote ref %s: %v", ref, err)
+		return "", xerrors.Errorf("could not pull remote ref %s: %w", ref, err)
 	}
 	digest, err := img.Digest()
 	if err != nil {
-		return "", fmt.Errorf("could not get digest for image %s: %v", img, err)
+		return "", xerrors.Errorf("could not get digest for image %s: %w", img, err)
 	}
 	return digest.String(), nil
 }

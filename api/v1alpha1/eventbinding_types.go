@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"context"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -88,6 +89,10 @@ type EventBindingList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []EventBinding `json:"items"`
 }
+
+// SetDefaults for pipelinerun
+func (eb *EventBinding) SetDefaults(ctx context.Context) {}
+
 
 func init() {
 	SchemeBuilder.Register(&EventBinding{}, &EventBindingList{})

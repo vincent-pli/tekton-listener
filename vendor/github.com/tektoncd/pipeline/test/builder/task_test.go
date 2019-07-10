@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -20,6 +20,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/knative/pkg/apis"
 	duckv1beta1 "github.com/knative/pkg/apis/duck/v1beta1"
+	"github.com/tektoncd/pipeline/pkg/apis/config"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/reconciler/v1alpha1/taskrun/resources"
 	tb "github.com/tektoncd/pipeline/test/builder"
@@ -49,8 +50,12 @@ func TestTask(t *testing.T) {
 		tb.TaskVolume("foo", tb.VolumeSource(corev1.VolumeSource{
 			HostPath: &corev1.HostPathVolumeSource{Path: "/foo/bar"},
 		})),
-		tb.TaskContainerTemplate(
+		tb.TaskStepTemplate(
 			tb.EnvVar("FRUIT", "BANANA"),
+		),
+		// The ContainerTemplate field is deprecated (#977)
+		tb.TaskContainerTemplate(
+			tb.EnvVar("JUICE", "MELON"),
 		),
 	))
 	expectedTask := &v1alpha1.Task{
@@ -68,7 +73,7 @@ func TestTask(t *testing.T) {
 					Type:       v1alpha1.PipelineResourceTypeGit,
 					TargetPath: "/foo/bar",
 				}},
-				Params: []v1alpha1.TaskParam{{Name: "param", Description: "mydesc", Default: "default"}},
+				Params: []v1alpha1.ParamSpec{{Name: "param", Description: "mydesc", Default: "default"}},
 			},
 			Outputs: &v1alpha1.Outputs{
 				Resources: []v1alpha1.TaskResource{{
@@ -82,10 +87,17 @@ func TestTask(t *testing.T) {
 					HostPath: &corev1.HostPathVolumeSource{Path: "/foo/bar"},
 				},
 			}},
-			ContainerTemplate: &corev1.Container{
+			StepTemplate: &corev1.Container{
 				Env: []corev1.EnvVar{{
 					Name:  "FRUIT",
 					Value: "BANANA",
+				}},
+			},
+			// The ContainerTemplate field is deprecated (#977)
+			ContainerTemplate: &corev1.Container{
+				Env: []corev1.EnvVar{{
+					Name:  "JUICE",
+					Value: "MELON",
 				}},
 			},
 		},
@@ -192,6 +204,7 @@ func TestTaskRunWithTaskRef(t *testing.T) {
 					Paths: []string{"output-folder"},
 				}},
 			},
+			Timeout: &metav1.Duration{Duration: config.DefaultTimeoutMinutes * time.Minute},
 			TaskRef: &v1alpha1.TaskRef{
 				Name:       "task-output",
 				Kind:       v1alpha1.ClusterTaskKind,
@@ -220,6 +233,7 @@ func TestTaskRunWithTaskSpec(t *testing.T) {
 		),
 		tb.TaskRunServiceAccount("sa"),
 		tb.TaskRunTimeout(2*time.Minute),
+		tb.TaskRunSpecStatus(v1alpha1.TaskRunSpecStatusCancelled),
 	))
 	expectedTaskRun := &v1alpha1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -235,6 +249,7 @@ func TestTaskRunWithTaskSpec(t *testing.T) {
 				}},
 			},
 			ServiceAccount: "sa",
+			Status:         v1alpha1.TaskRunSpecStatusCancelled,
 			Timeout:        &metav1.Duration{Duration: 2 * time.Minute},
 		},
 	}

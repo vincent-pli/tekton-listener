@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,10 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// The nop command is a no-op, it simply prints a message and exits. Nop
+// is used to stop sidecar containers in TaskRun Pods. When a Task's Steps
+// are complete any sidecars running alongside the Step containers need
+// to be terminated. Whatever image the sidecars are running is replaced
+// with nop and the sidecar quickly exits.
+
 package main
 
 import "fmt"
 
 func main() {
-	fmt.Println("Build successful")
+	fmt.Println("Task completed successfully")
 }

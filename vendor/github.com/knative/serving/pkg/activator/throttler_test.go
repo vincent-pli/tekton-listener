@@ -26,6 +26,7 @@ import (
 
 	"github.com/knative/pkg/controller"
 	. "github.com/knative/pkg/logging/testing"
+	"github.com/knative/pkg/system"
 	"github.com/knative/pkg/test/helpers"
 	"github.com/knative/serving/pkg/apis/networking"
 	nv1a1 "github.com/knative/serving/pkg/apis/networking/v1alpha1"
@@ -38,6 +39,7 @@ import (
 	servinglisters "github.com/knative/serving/pkg/client/listers/serving/v1alpha1"
 	"github.com/knative/serving/pkg/queue"
 
+	_ "github.com/knative/pkg/system/testing"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,7 +59,7 @@ var (
 	revID = RevisionID{testNamespace, testRevision}
 )
 
-func TestThrottler_UpdateCapacity(t *testing.T) {
+func TestThrottlerUpdateCapacity(t *testing.T) {
 	samples := []struct {
 		label          string
 		revisionLister servinglisters.RevisionLister
@@ -128,7 +130,80 @@ func TestThrottler_UpdateCapacity(t *testing.T) {
 	}
 }
 
-func TestThrottler_Try(t *testing.T) {
+func TestThrottlerActivatorEndpoints(t *testing.T) {
+	const (
+		updatePollInterval = 10 * time.Millisecond
+		updatePollTimeout  = 3 * time.Second
+	)
+
+	ep := &corev1.Endpoints{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testRevision,
+			Namespace: testNamespace,
+		},
+		Subsets: endpointsSubset(1, 1),
+	}
+	fake := kubefake.NewSimpleClientset(ep)
+	informer := kubeinformers.NewSharedInformerFactory(fake, 0)
+	endpoints := informer.Core().V1().Endpoints()
+	endpoints.Informer().GetIndexer().Add(ep)
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	controller.StartInformers(stopCh, endpoints.Informer())
+
+	scenarios := []struct {
+		name                string
+		activatorCount      int
+		revisionConcurrency int
+		wantCapacity        int
+	}{{
+		name:                "less activators, more cc",
+		activatorCount:      2,
+		revisionConcurrency: 10,
+		wantCapacity:        5, //revConcurrency / activatorCount
+	}, {
+		name:                "many activators, less cc",
+		activatorCount:      3,
+		revisionConcurrency: 2,
+		wantCapacity:        1,
+	}}
+
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			activatorEp := &corev1.Endpoints{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      K8sServiceName,
+					Namespace: system.Namespace(),
+				},
+				Subsets: endpointsSubset(1, s.activatorCount),
+			}
+
+			throttler := getThrottler(
+				defaultMaxConcurrency,
+				revisionLister(testNamespace, testRevision, v1beta1.RevisionContainerConcurrencyType(s.revisionConcurrency)),
+				endpoints,
+				sksLister(testNamespace, testRevision),
+				TestLogger(t),
+				initCapacity,
+			)
+			throttler.UpdateCapacity(revID, 1) // This sets the initial breaker
+
+			fake.CoreV1().Endpoints(activatorEp.Namespace).Create(activatorEp)
+			endpoints.Informer().GetIndexer().Add(activatorEp)
+
+			breaker := throttler.breakers[RevisionID{Name: testRevision, Namespace: testNamespace}]
+
+			if err := wait.PollImmediate(updatePollInterval, updatePollTimeout, func() (bool, error) {
+				return breaker.Capacity() == s.wantCapacity, nil
+			}); err != nil {
+				t.Errorf("Capacity() = %d, want %d", breaker.Capacity(), s.wantCapacity)
+			}
+		})
+	}
+}
+
+func TestThrottlerTry(t *testing.T) {
 	defer ClearAll()
 	samples := []struct {
 		label             string
@@ -182,7 +257,7 @@ func TestThrottler_Try(t *testing.T) {
 			if s.addCapacity {
 				throttler.UpdateCapacity(revID, 1)
 			}
-			err := throttler.Try(revID, func() {
+			err := throttler.Try(0, revID, func() {
 				called++
 			})
 			if err == nil && s.wantError {
@@ -197,7 +272,7 @@ func TestThrottler_Try(t *testing.T) {
 	}
 }
 
-func TestThrottler_TryOverload(t *testing.T) {
+func TestThrottlerTryOverload(t *testing.T) {
 	maxConcurrency := 1
 	initialCapacity := 1
 	queueLength := 1
@@ -216,7 +291,7 @@ func TestThrottler_TryOverload(t *testing.T) {
 	allowedRequests := initialCapacity + queueLength
 	for i := 0; i < allowedRequests+1; i++ {
 		go func() {
-			err := th.Try(revID, func() {
+			err := th.Try(0, revID, func() {
 				doneCh <- struct{}{} // Blocks forever
 			})
 			if err != nil {
@@ -244,7 +319,7 @@ func TestThrottler_TryOverload(t *testing.T) {
 	}
 }
 
-func TestThrottler_Remove(t *testing.T) {
+func TestThrottlerRemove(t *testing.T) {
 	throttler := getThrottler(
 		defaultMaxConcurrency,
 		revisionLister(testNamespace, testRevision, 10),

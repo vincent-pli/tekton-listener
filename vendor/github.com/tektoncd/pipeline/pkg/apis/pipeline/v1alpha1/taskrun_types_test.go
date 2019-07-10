@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors.
+Copyright 2019 The Tekton Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha1_test
 
 import (
 	"testing"
@@ -22,17 +22,15 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/knative/pkg/apis"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	tb "github.com/tektoncd/pipeline/test/builder"
 )
 
 func TestTaskRun_GetBuildPodRef(t *testing.T) {
-	tr := TaskRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "taskrunname",
-			Namespace: "testns",
-		},
-	}
+	tr := tb.TaskRun("taskrunname", "testns")
 	if d := cmp.Diff(tr.GetBuildPodRef(), corev1.ObjectReference{
 		APIVersion: "v1",
 		Kind:       "Pod",
@@ -46,33 +44,15 @@ func TestTaskRun_GetBuildPodRef(t *testing.T) {
 func TestTaskRun_GetPipelineRunPVCName(t *testing.T) {
 	tests := []struct {
 		name            string
-		tr              *TaskRun
+		tr              *v1alpha1.TaskRun
 		expectedPVCName string
 	}{{
-		name: "invalid owner reference",
-		tr: &TaskRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "taskrunname",
-				Namespace: "testns",
-				OwnerReferences: []metav1.OwnerReference{{
-					Kind: "SomeOtherOwner",
-					Name: "testpr",
-				}},
-			},
-		},
+		name:            "invalid owner reference",
+		tr:              tb.TaskRun("taskrunname", "testns", tb.TaskRunOwnerReference("SomeOtherOwner", "testpr")),
 		expectedPVCName: "",
 	}, {
-		name: "valid pipelinerun owner",
-		tr: &TaskRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "taskrunname",
-				Namespace: "testns",
-				OwnerReferences: []metav1.OwnerReference{{
-					Kind: "PipelineRun",
-					Name: "testpr",
-				}},
-			},
-		},
+		name:            "valid pipelinerun owner",
+		tr:              tb.TaskRun("taskrunname", "testns", tb.TaskRunOwnerReference("PipelineRun", "testpr")),
 		expectedPVCName: "testpr-pvc",
 	}, {
 		name:            "nil taskrun",
@@ -90,33 +70,15 @@ func TestTaskRun_GetPipelineRunPVCName(t *testing.T) {
 func TestTaskRun_HasPipelineRun(t *testing.T) {
 	tests := []struct {
 		name string
-		tr   *TaskRun
+		tr   *v1alpha1.TaskRun
 		want bool
 	}{{
 		name: "invalid owner reference",
-		tr: &TaskRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "taskrunname",
-				Namespace: "testns",
-				OwnerReferences: []metav1.OwnerReference{{
-					Kind: "SomeOtherOwner",
-					Name: "testpr",
-				}},
-			},
-		},
+		tr:   tb.TaskRun("taskrunname", "testns", tb.TaskRunOwnerReference("SomeOtherOwner", "testpr")),
 		want: false,
 	}, {
 		name: "valid pipelinerun owner",
-		tr: &TaskRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "taskrunname",
-				Namespace: "testns",
-				OwnerReferences: []metav1.OwnerReference{{
-					Kind: "PipelineRun",
-					Name: "testpr",
-				}},
-			},
-		},
+		tr:   tb.TaskRun("taskrunname", "testns", tb.TaskRunOwnerReference("PipelineRun", "testpr")),
 		want: true,
 	}}
 	for _, tt := range tests {
@@ -129,36 +91,28 @@ func TestTaskRun_HasPipelineRun(t *testing.T) {
 }
 
 func TestTaskRunIsDone(t *testing.T) {
-	tr := &TaskRun{}
-	foo := &apis.Condition{
-		Type:   apis.ConditionSucceeded,
-		Status: corev1.ConditionFalse,
-	}
-	tr.Status.SetCondition(foo)
+	tr := tb.TaskRun("", "", tb.TaskRunStatus(tb.Condition(
+		apis.Condition{
+			Type:   apis.ConditionSucceeded,
+			Status: corev1.ConditionFalse,
+		},
+	)))
 	if !tr.IsDone() {
 		t.Fatal("Expected pipelinerun status to be done")
 	}
 }
 
 func TestTaskRunIsCancelled(t *testing.T) {
-	tr := &TaskRun{
-		Spec: TaskRunSpec{
-			Status: TaskRunSpecStatusCancelled,
-		},
-	}
-
+	tr := tb.TaskRun("", "", tb.TaskRunSpec(
+		tb.TaskRunSpecStatus(v1alpha1.TaskRunSpecStatusCancelled)),
+	)
 	if !tr.IsCancelled() {
 		t.Fatal("Expected pipelinerun status to be cancelled")
 	}
 }
 
 func TestTaskRunKey(t *testing.T) {
-	tr := &TaskRun{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "taskrunname",
-			Namespace: "testns",
-		},
-	}
+	tr := tb.TaskRun("taskrunname", "testns")
 	expectedKey := "TaskRun/testns/taskrunname"
 	if tr.GetRunKey() != expectedKey {
 		t.Fatalf("Expected taskrun key to be %s but got %s", expectedKey, tr.GetRunKey())
@@ -168,34 +122,29 @@ func TestTaskRunKey(t *testing.T) {
 func TestTaskRunHasStarted(t *testing.T) {
 	params := []struct {
 		name          string
-		trStatus      TaskRunStatus
+		trStatus      v1alpha1.TaskRunStatus
 		expectedValue bool
 	}{{
 		name:          "trWithNoStartTime",
-		trStatus:      TaskRunStatus{},
+		trStatus:      v1alpha1.TaskRunStatus{},
 		expectedValue: false,
 	}, {
 		name: "trWithStartTime",
-		trStatus: TaskRunStatus{
+		trStatus: v1alpha1.TaskRunStatus{
 			StartTime: &metav1.Time{Time: time.Now()},
 		},
 		expectedValue: true,
 	}, {
 		name: "trWithZeroStartTime",
-		trStatus: TaskRunStatus{
+		trStatus: v1alpha1.TaskRunStatus{
 			StartTime: &metav1.Time{},
 		},
 		expectedValue: false,
 	}}
 	for _, tc := range params {
 		t.Run(tc.name, func(t *testing.T) {
-			tr := &TaskRun{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "prunname",
-					Namespace: "testns",
-				},
-				Status: tc.trStatus,
-			}
+			tr := tb.TaskRun("taskrunname", "testns")
+			tr.Status = tc.trStatus
 			if tr.HasStarted() != tc.expectedValue {
 				t.Fatalf("Expected taskrun HasStarted() to return %t but got %t", tc.expectedValue, tr.HasStarted())
 			}

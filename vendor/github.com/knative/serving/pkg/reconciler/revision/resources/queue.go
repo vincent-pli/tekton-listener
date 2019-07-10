@@ -17,11 +17,16 @@ limitations under the License.
 package resources
 
 import (
+	"math"
 	"strconv"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/knative/pkg/logging"
+	pkgmetrics "github.com/knative/pkg/metrics"
+	"github.com/knative/pkg/ptr"
 	"github.com/knative/pkg/system"
 	"github.com/knative/serving/pkg/apis/networking"
 	"github.com/knative/serving/pkg/apis/serving"
@@ -37,12 +42,6 @@ import (
 const requestQueueHTTPPortName = "queue-port"
 
 var (
-	queueResources = corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceName("cpu"): queueContainerCPU,
-		},
-	}
-
 	queueHTTPPort = corev1.ContainerPort{
 		Name:          requestQueueHTTPPortName,
 		ContainerPort: int32(networking.BackendHTTPPort),
@@ -53,17 +52,20 @@ var (
 	}
 	queueNonServingPorts = []corev1.ContainerPort{{
 		// Provides health checks and lifecycle hooks.
-		Name:          v1alpha1.RequestQueueAdminPortName,
-		ContainerPort: int32(networking.RequestQueueAdminPort),
+		Name:          v1alpha1.QueueAdminPortName,
+		ContainerPort: int32(networking.QueueAdminPort),
 	}, {
-		Name:          v1alpha1.RequestQueueMetricsPortName,
-		ContainerPort: int32(networking.RequestQueueMetricsPort),
+		Name:          v1alpha1.AutoscalingQueueMetricsPortName,
+		ContainerPort: int32(networking.AutoscalingQueueMetricsPort),
+	}, {
+		Name:          v1alpha1.UserQueueMetricsPortName,
+		ContainerPort: int32(networking.UserQueueMetricsPort),
 	}}
 
 	queueReadinessProbe = &corev1.Probe{
 		Handler: corev1.Handler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Port: intstr.FromInt(networking.RequestQueueAdminPort),
+				Port: intstr.FromInt(networking.QueueAdminPort),
 				Path: queue.RequestQueueHealthPath,
 			},
 		},
@@ -77,7 +79,87 @@ var (
 		// thus don't want to be limited by K8s granularity here.
 		TimeoutSeconds: 10,
 	}
+
+	queueSecurityContext = &corev1.SecurityContext{
+		AllowPrivilegeEscalation: ptr.Bool(false),
+	}
 )
+
+func createQueueResources(annotations map[string]string, userContainer *corev1.Container) corev1.ResourceRequirements {
+	resources := corev1.ResourceRequirements{}
+	resourceRequests := corev1.ResourceList{corev1.ResourceCPU: queueContainerCPU}
+	resourceLimits := corev1.ResourceList{}
+	ok := false
+	var requestCPU, limitCPU, requestMemory, limitMemory resource.Quantity
+	var resourcePercentage float32
+
+	if ok, resourcePercentage = createResourcePercentageFromAnnotations(annotations, serving.QueueSideCarResourcePercentageAnnotation); ok {
+
+		if ok, requestCPU = computeResourceRequirements(userContainer.Resources.Requests.Cpu(), resourcePercentage, queueContainerRequestCPU); ok {
+			resourceRequests[corev1.ResourceCPU] = requestCPU
+		}
+
+		if ok, limitCPU = computeResourceRequirements(userContainer.Resources.Limits.Cpu(), resourcePercentage, queueContainerLimitCPU); ok {
+			resourceLimits[corev1.ResourceCPU] = limitCPU
+		}
+
+		if ok, requestMemory = computeResourceRequirements(userContainer.Resources.Requests.Memory(), resourcePercentage, queueContainerRequestMemory); ok {
+			resourceRequests[corev1.ResourceMemory] = requestMemory
+		}
+
+		if ok, limitMemory = computeResourceRequirements(userContainer.Resources.Limits.Memory(), resourcePercentage, queueContainerLimitMemory); ok {
+			resourceLimits[corev1.ResourceMemory] = limitMemory
+		}
+
+	}
+
+	resources.Requests = resourceRequests
+
+	if len(resourceLimits) != 0 {
+		resources.Limits = resourceLimits
+	}
+
+	return resources
+}
+
+func computeResourceRequirements(resourceQuantity *resource.Quantity, percentage float32, boundary resourceBoundary) (bool, resource.Quantity) {
+	if resourceQuantity.IsZero() {
+		return false, resource.Quantity{}
+	}
+
+	// Incase the resourceQuantity MilliValue overflow in we use MaxInt64
+	// https://github.com/kubernetes/apimachinery/blob/master/pkg/api/resource/quantity.go
+	scaledValue := resourceQuantity.Value()
+	scaledMilliValue := int64(math.MaxInt64 - 1)
+	if scaledValue < (math.MaxInt64 / 1000) {
+		scaledMilliValue = resourceQuantity.MilliValue()
+	}
+
+	// float64(math.MaxInt64) > math.MaxInt64, to avoid overflow
+	percentageValue := float64(scaledMilliValue) * float64(percentage)
+	var newValue int64
+	if percentageValue >= math.MaxInt64 {
+		newValue = math.MaxInt64
+	} else {
+		newValue = int64(percentageValue)
+	}
+
+	newquantity := *resource.NewMilliQuantity(newValue, resource.BinarySI)
+	newquantity = boundary.applyBoundary(newquantity)
+	return true, newquantity
+}
+
+func createResourcePercentageFromAnnotations(m map[string]string, k string) (bool, float32) {
+	v, ok := m[k]
+	if !ok {
+		return false, 0
+	}
+	value, err := strconv.ParseFloat(v, 32)
+	if err != nil {
+		return false, 0
+	}
+	return true, float32(value / 100)
+}
 
 // makeQueueContainer creates the container spec for the queue sidecar.
 func makeQueueContainer(rev *v1alpha1.Revision, loggingConfig *logging.Config, observabilityConfig *metrics.ObservabilityConfig,
@@ -109,12 +191,19 @@ func makeQueueContainer(rev *v1alpha1.Revision, loggingConfig *logging.Config, o
 		ports = append(ports, queueHTTPPort)
 	}
 
+	var volumeMounts []corev1.VolumeMount
+	if observabilityConfig.EnableVarLogCollection {
+		volumeMounts = append(volumeMounts, internalVolumeMount)
+	}
+
 	return &corev1.Container{
-		Name:           QueueContainerName,
-		Image:          deploymentConfig.QueueSidecarImage,
-		Resources:      queueResources,
-		Ports:          ports,
-		ReadinessProbe: queueReadinessProbe,
+		Name:            QueueContainerName,
+		Image:           deploymentConfig.QueueSidecarImage,
+		Resources:       createQueueResources(rev.GetAnnotations(), rev.Spec.GetContainer()),
+		Ports:           ports,
+		ReadinessProbe:  queueReadinessProbe,
+		VolumeMounts:    volumeMounts,
+		SecurityContext: queueSecurityContext,
 		Env: []corev1.EnvVar{{
 			Name:  "SERVING_NAMESPACE",
 			Value: rev.Namespace,
@@ -168,6 +257,21 @@ func makeQueueContainer(rev *v1alpha1.Revision, loggingConfig *logging.Config, o
 		}, {
 			Name:  system.NamespaceEnvKey,
 			Value: system.Namespace(),
+		}, {
+			Name:  pkgmetrics.DomainEnv,
+			Value: pkgmetrics.Domain(),
+		}, {
+			Name:  "USER_CONTAINER_NAME",
+			Value: rev.Spec.GetContainer().Name,
+		}, {
+			Name:  "ENABLE_VAR_LOG_COLLECTION",
+			Value: strconv.FormatBool(observabilityConfig.EnableVarLogCollection),
+		}, {
+			Name:  "VAR_LOG_VOLUME_NAME",
+			Value: varLogVolumeName,
+		}, {
+			Name:  "INTERNAL_VOLUME_PATH",
+			Value: internalVolumePath,
 		}},
 	}
 }

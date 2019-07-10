@@ -34,7 +34,6 @@ import (
 	"github.com/knative/serving/pkg/gc"
 	"github.com/knative/serving/pkg/network"
 	"github.com/knative/serving/pkg/reconciler/route/config"
-	"github.com/knative/serving/pkg/reconciler/route/domains"
 	"github.com/knative/serving/pkg/reconciler/route/traffic"
 )
 
@@ -129,8 +128,9 @@ func TestNewMakeK8SService(t *testing.T) {
 			},
 			expectedMeta: expectedMeta,
 			expectedSpec: corev1.ServiceSpec{
-				Type:         corev1.ServiceTypeExternalName,
-				ExternalName: "istio-ingressgateway.istio-system.svc.cluster.local",
+				Type:            corev1.ServiceTypeExternalName,
+				ExternalName:    "istio-ingressgateway.istio-system.svc.cluster.local",
+				SessionAffinity: corev1.ServiceAffinityNone,
 			},
 		},
 		"ingress-with-only-mesh": {
@@ -162,7 +162,7 @@ func TestNewMakeK8SService(t *testing.T) {
 				},
 			},
 			expectedMeta: metav1.ObjectMeta{
-				Name:      "test-route-my-target-name",
+				Name:      "my-target-name-test-route",
 				Namespace: r.Namespace,
 				OwnerReferences: []metav1.OwnerReference{
 					*kmeta.NewControllerRef(r),
@@ -182,23 +182,27 @@ func TestNewMakeK8SService(t *testing.T) {
 	}
 
 	for name, scenario := range scenarios {
-		service, err := MakeK8sService(scenario.route, scenario.targetName, scenario.ingress)
-		// Validate
-		if scenario.shouldFail && err == nil {
-			t.Errorf("Test %q failed: returned success but expected error", name)
-		}
-		if !scenario.shouldFail {
-			if err != nil {
-				t.Errorf("Test %q failed: returned error: %v", name, err)
+		t.Run(name, func(t *testing.T) {
+			cfg := testConfig()
+			ctx := config.ToContext(context.Background(), cfg)
+			service, err := MakeK8sService(ctx, scenario.route, scenario.targetName, scenario.ingress)
+			// Validate
+			if scenario.shouldFail && err == nil {
+				t.Errorf("Test %q failed: returned success but expected error", name)
 			}
+			if !scenario.shouldFail {
+				if err != nil {
+					t.Errorf("Test %q failed: returned error: %v", name, err)
+				}
 
-			if !cmp.Equal(scenario.expectedMeta, service.ObjectMeta) {
-				t.Errorf("Unexpected Metadata (-want +got): %s", cmp.Diff(scenario.expectedMeta, service.ObjectMeta))
+				if !cmp.Equal(scenario.expectedMeta, service.ObjectMeta) {
+					t.Errorf("Unexpected Metadata (-want +got): %s", cmp.Diff(scenario.expectedMeta, service.ObjectMeta))
+				}
+				if !cmp.Equal(scenario.expectedSpec, service.Spec) {
+					t.Errorf("Unexpected ServiceSpec (-want +got): %s", cmp.Diff(scenario.expectedSpec, service.Spec))
+				}
 			}
-			if !cmp.Equal(scenario.expectedSpec, service.Spec) {
-				t.Errorf("Unexpected ServiceSpec (-want +got): %s", cmp.Diff(scenario.expectedSpec, service.Spec))
-			}
-		}
+		})
 	}
 }
 
@@ -209,13 +213,12 @@ func TestMakePlaceholderK8sService(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
 	cfg := testConfig()
-	ctx = config.ToContext(ctx, cfg)
+	ctx := config.ToContext(context.Background(), cfg)
 
 	service, err := MakeK8sPlaceholderService(ctx, r, target.Tag)
 	expectedMeta := metav1.ObjectMeta{
-		Name:      domains.SubdomainName(r, target.Tag),
+		Name:      target.Tag + "-" + r.Name,
 		Namespace: r.Namespace,
 		OwnerReferences: []metav1.OwnerReference{
 			*kmeta.NewControllerRef(r),
@@ -225,8 +228,9 @@ func TestMakePlaceholderK8sService(t *testing.T) {
 		},
 	}
 	expectedSpec := corev1.ServiceSpec{
-		Type:         corev1.ServiceTypeExternalName,
-		ExternalName: "test-route-foo.test-ns.example.com",
+		Type:            corev1.ServiceTypeExternalName,
+		ExternalName:    "foo-test-route.test-ns.example.com",
+		SessionAffinity: corev1.ServiceAffinityNone,
 	}
 
 	if err != nil {
@@ -261,6 +265,7 @@ func testConfig() *config.Config {
 		Network: &network.Config{
 			DefaultClusterIngressClass: "test-ingress-class",
 			DomainTemplate:             network.DefaultDomainTemplate,
+			TagTemplate:                network.DefaultTagTemplate,
 		},
 		GC: &gc.Config{
 			StaleRevisionLastpinnedDebounce: time.Duration(1 * time.Minute),

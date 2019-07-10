@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,13 +21,14 @@ import (
 	"log"
 	"time"
 
+	"github.com/knative/pkg/logging"
+
+	tklogging "github.com/tektoncd/pipeline/pkg/logging"
 	corev1 "k8s.io/api/core/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-
-	"github.com/tektoncd/pipeline/pkg/logging"
 
 	sharedclientset "github.com/knative/pkg/client/clientset/versioned"
 	"github.com/knative/pkg/controller"
@@ -45,6 +46,8 @@ import (
 const (
 	threadsPerController = 2
 	resyncPeriod         = 10 * time.Hour
+	// ControllerLogKey is the name of the logger for the controller cmd
+	ControllerLogKey = "controller"
 )
 
 var (
@@ -63,7 +66,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing logging configuration: %v", err)
 	}
-	logger, atomicLevel := logging.NewLoggerFromConfig(loggingConfig, logging.ControllerLogKey)
+	logger, atomicLevel := logging.NewLoggerFromConfig(loggingConfig, ControllerLogKey)
 	defer logger.Sync()
 
 	logger.Info("Starting the Pipeline Controller")
@@ -113,7 +116,8 @@ func main() {
 
 	pipelineInformer := pipelineInformerFactory.Tekton().V1alpha1().Pipelines()
 	pipelineRunInformer := pipelineInformerFactory.Tekton().V1alpha1().PipelineRuns()
-	timeoutHandler := reconciler.NewTimeoutHandler(kubeClient, pipelineClient, stopCh, logger)
+
+	timeoutHandler := reconciler.NewTimeoutHandler(stopCh, logger)
 
 	trc := taskrun.NewController(opt,
 		taskRunInformer,
@@ -141,10 +145,10 @@ func main() {
 	}
 	timeoutHandler.SetTaskRunCallbackFunc(trc.Enqueue)
 	timeoutHandler.SetPipelineRunCallbackFunc(prc.Enqueue)
-	timeoutHandler.CheckTimeouts()
+	timeoutHandler.CheckTimeouts(kubeClient, pipelineClient)
 
 	// Watch the logging config map and dynamically update logging levels.
-	configMapWatcher.Watch(logging.ConfigName, logging.UpdateLevelFromConfigMap(logger, atomicLevel, logging.ControllerLogKey))
+	configMapWatcher.Watch(tklogging.ConfigName, logging.UpdateLevelFromConfigMap(logger, atomicLevel, ControllerLogKey))
 
 	kubeInformerFactory.Start(stopCh)
 	pipelineInformerFactory.Start(stopCh)

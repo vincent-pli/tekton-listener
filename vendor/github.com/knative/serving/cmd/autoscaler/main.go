@@ -24,22 +24,28 @@ import (
 
 	"github.com/knative/pkg/configmap"
 	"github.com/knative/pkg/controller"
+	"github.com/knative/pkg/injection"
+	"github.com/knative/pkg/injection/clients/kubeclient"
+	endpointsinformer "github.com/knative/pkg/injection/informers/kubeinformers/corev1/endpoints"
+	"github.com/knative/pkg/logging"
+	"github.com/knative/pkg/metrics"
 	pkgmetrics "github.com/knative/pkg/metrics"
 	"github.com/knative/pkg/signals"
+	"github.com/knative/pkg/system"
 	"github.com/knative/serving/pkg/apis/serving"
 	"github.com/knative/serving/pkg/autoscaler"
 	"github.com/knative/serving/pkg/autoscaler/statserver"
-	informers "github.com/knative/serving/pkg/client/informers/externalversions"
-	"github.com/knative/serving/pkg/logging"
-	"github.com/knative/serving/pkg/metrics"
-	"github.com/knative/serving/pkg/reconciler"
 	"github.com/knative/serving/pkg/reconciler/autoscaling/hpa"
 	"github.com/knative/serving/pkg/reconciler/autoscaling/kpa"
+	"github.com/knative/serving/pkg/resources"
+	basecmd "github.com/kubernetes-incubator/custom-metrics-apiserver/pkg/cmd"
+	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	kubeinformers "k8s.io/client-go/informers"
+
 	corev1informers "k8s.io/client-go/informers/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -55,107 +61,15 @@ var (
 )
 
 func main() {
-	flag.Parse()
-
-	logger, atomicLevel := setupLogger()
-	defer flush(logger)
+	// Initialize early to get access to flags and merge them with the autoscaler flags.
+	customMetricsAdapter := &basecmd.AdapterBase{}
+	customMetricsAdapter.Flags().AddGoFlagSet(flag.CommandLine)
+	pflag.Parse()
 
 	// Set up signals so we handle the first shutdown signal gracefully.
-	stopCh := signals.SetupSignalHandler()
-	// statsCh is the main communication channel between the stats channel and multiscaler.
-	statsCh := make(chan *autoscaler.StatMessage, statsBufferLen)
-	defer close(statsCh)
+	ctx := signals.NewContext()
 
-	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfig)
-	if err != nil {
-		logger.Fatalw("Error building kubeconfig", zap.Error(err))
-	}
-
-	opt := reconciler.NewOptionsOrDie(cfg, logger, stopCh)
-
-	// Watch the logging config map and dynamically update logging levels.
-	opt.ConfigMapWatcher.Watch(logging.ConfigMapName(), logging.UpdateLevelFromConfigMap(logger, atomicLevel, component))
-	// Watch the observability config map and dynamically update metrics exporter.
-	opt.ConfigMapWatcher.Watch(metrics.ObservabilityConfigName, metrics.UpdateExporterFromConfigMap(component, logger))
-
-	// Set up informer factories.
-	servingInformerFactory := informers.NewSharedInformerFactory(opt.ServingClientSet, opt.ResyncPeriod)
-	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(opt.KubeClientSet, opt.ResyncPeriod)
-
-	// Set up informers.
-	paInformer := servingInformerFactory.Autoscaling().V1alpha1().PodAutoscalers()
-	sksInformer := servingInformerFactory.Networking().V1alpha1().ServerlessServices()
-	endpointsInformer := kubeInformerFactory.Core().V1().Endpoints()
-	serviceInformer := kubeInformerFactory.Core().V1().Services()
-	hpaInformer := kubeInformerFactory.Autoscaling().V1().HorizontalPodAutoscalers()
-
-	collector := autoscaler.NewMetricCollector(statsScraperFactoryFunc(endpointsInformer.Lister()), logger)
-
-	// Set up scalers.
-	// uniScalerFactory depends endpointsInformer to be set.
-	multiScaler := autoscaler.NewMultiScaler(stopCh, uniScalerFactoryFunc(endpointsInformer, collector), logger)
-
-	controllers := []*controller.Impl{
-		kpa.NewController(&opt, paInformer, sksInformer, serviceInformer, endpointsInformer, multiScaler, collector),
-		hpa.NewController(&opt, paInformer, sksInformer, hpaInformer),
-	}
-
-	// Set up a statserver.
-	statsServer := statserver.New(statsServerAddr, statsCh, logger)
-	defer statsServer.Shutdown(time.Second * 5)
-
-	// Start watching the configs.
-	if err := opt.ConfigMapWatcher.Start(stopCh); err != nil {
-		logger.Fatalw("Failed to start watching configs", zap.Error(err))
-	}
-
-	// Start all of the informers and wait for them to sync.
-	if err := controller.StartInformers(
-		stopCh,
-		endpointsInformer.Informer(),
-		hpaInformer.Informer(),
-		paInformer.Informer(),
-		serviceInformer.Informer(),
-		sksInformer.Informer(),
-	); err != nil {
-		logger.Fatalw("Failed to start informers", err)
-	}
-
-	go controller.StartAll(stopCh, controllers...)
-
-	// Run the controllers and the statserver in a group.
-	var eg errgroup.Group
-	eg.Go(func() error {
-		return statsServer.ListenAndServe()
-	})
-
-	go func() {
-		for {
-			sm, ok := <-statsCh
-			if !ok {
-				break
-			}
-			collector.Record(sm.Key, sm.Stat)
-			multiScaler.Poke(sm.Key, sm.Stat)
-		}
-	}()
-
-	egCh := make(chan struct{})
-
-	go func() {
-		if err := eg.Wait(); err != nil {
-			logger.Errorw("Group error.", zap.Error(err))
-		}
-		close(egCh)
-	}()
-
-	select {
-	case <-egCh:
-	case <-stopCh:
-	}
-}
-
-func setupLogger() (*zap.SugaredLogger, zap.AtomicLevel) {
+	// Set up our logger.
 	loggingConfigMap, err := configmap.Load("/etc/config-logging")
 	if err != nil {
 		log.Fatal("Error loading logging configuration:", err)
@@ -164,7 +78,87 @@ func setupLogger() (*zap.SugaredLogger, zap.AtomicLevel) {
 	if err != nil {
 		log.Fatal("Error parsing logging configuration:", err)
 	}
-	return logging.NewLoggerFromConfig(loggingConfig, component)
+	logger, atomicLevel := logging.NewLoggerFromConfig(loggingConfig, component)
+	defer flush(logger)
+	ctx = logging.WithLogger(ctx, logger)
+
+	cfg, err := clientcmd.BuildConfigFromFlags(*masterURL, *kubeconfig)
+	if err != nil {
+		logger.Fatalw("Error building kubeconfig", zap.Error(err))
+	}
+
+	logger.Infof("Registering %d clients", len(injection.Default.GetClients()))
+	logger.Infof("Registering %d informer factories", len(injection.Default.GetInformerFactories()))
+	logger.Infof("Registering %d informers", len(injection.Default.GetInformers()))
+	logger.Infof("Registering %d controllers", 2)
+
+	// Adjust our client's rate limits based on the number of controller's we are running.
+	cfg.QPS = 2 * rest.DefaultQPS
+	cfg.Burst = 2 * rest.DefaultBurst
+
+	ctx, informers := injection.Default.SetupInformers(ctx, cfg)
+
+	// statsCh is the main communication channel between the stats channel and multiscaler.
+	statsCh := make(chan *autoscaler.StatMessage, statsBufferLen)
+	defer close(statsCh)
+
+	cmw := configmap.NewInformedWatcher(kubeclient.Get(ctx), system.Namespace())
+	// Watch the logging config map and dynamically update logging levels.
+	cmw.Watch(logging.ConfigMapName(), logging.UpdateLevelFromConfigMap(logger, atomicLevel, component))
+	// Watch the observability config map and dynamically update metrics exporter.
+	cmw.Watch(metrics.ConfigMapName(), metrics.UpdateExporterFromConfigMap(component, logger))
+
+	endpointsInformer := endpointsinformer.Get(ctx)
+
+	collector := autoscaler.NewMetricCollector(statsScraperFactoryFunc(endpointsInformer.Lister()), logger)
+	customMetricsAdapter.WithCustomMetrics(autoscaler.NewMetricProvider(collector))
+
+	// Set up scalers.
+	// uniScalerFactory depends endpointsInformer to be set.
+	multiScaler := autoscaler.NewMultiScaler(ctx.Done(), uniScalerFactoryFunc(endpointsInformer, collector), logger)
+
+	psInformerFactory := resources.NewPodScalableInformerFactory(ctx)
+	controllers := []*controller.Impl{
+		kpa.NewController(ctx, cmw, multiScaler, collector, psInformerFactory),
+		hpa.NewController(ctx, cmw, collector, psInformerFactory),
+	}
+
+	// Set up a statserver.
+	statsServer := statserver.New(statsServerAddr, statsCh, logger)
+
+	// Start watching the configs.
+	if err := cmw.Start(ctx.Done()); err != nil {
+		logger.Fatalw("Failed to start watching configs", zap.Error(err))
+	}
+
+	// Start all of the informers and wait for them to sync.
+	if err := controller.StartInformers(ctx.Done(), informers...); err != nil {
+		logger.Fatalw("Failed to start informers", err)
+	}
+
+	go controller.StartAll(ctx.Done(), controllers...)
+
+	go func() {
+		for sm := range statsCh {
+			collector.Record(sm.Key, sm.Stat)
+			multiScaler.Poke(sm.Key, sm.Stat)
+		}
+	}()
+
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		return customMetricsAdapter.Run(ctx.Done())
+	})
+	eg.Go(statsServer.ListenAndServe)
+
+	// This will block until either a signal arrives or one of the grouped functions
+	// returns an error.
+	<-egCtx.Done()
+
+	statsServer.Shutdown(5 * time.Second)
+	if err := eg.Wait(); err != nil {
+		logger.Errorw("Error while shutting down", zap.Error(err))
+	}
 }
 
 func uniScalerFactoryFunc(endpointsInformer corev1informers.EndpointsInformer, metricClient autoscaler.MetricClient) func(decider *autoscaler.Decider) (autoscaler.UniScaler, error) {
@@ -185,13 +179,15 @@ func uniScalerFactoryFunc(endpointsInformer corev1informers.EndpointsInformer, m
 			return nil, err
 		}
 
-		return autoscaler.New(decider.Namespace, decider.Name, metricClient, endpointsInformer, decider.Spec, reporter)
+		podCounter := resources.NewScopedEndpointsCounter(endpointsInformer.Lister(), decider.Namespace, decider.Name)
+		return autoscaler.New(decider.Namespace, decider.Name, metricClient, podCounter, decider.Spec, reporter)
 	}
 }
 
 func statsScraperFactoryFunc(endpointsLister corev1listers.EndpointsLister) func(metric *autoscaler.Metric) (autoscaler.StatsScraper, error) {
 	return func(metric *autoscaler.Metric) (autoscaler.StatsScraper, error) {
-		return autoscaler.NewServiceScraper(metric, endpointsLister)
+		podCounter := resources.NewScopedEndpointsCounter(endpointsLister, metric.Namespace, metric.Spec.ScrapeTarget)
+		return autoscaler.NewServiceScraper(metric, podCounter)
 	}
 }
 

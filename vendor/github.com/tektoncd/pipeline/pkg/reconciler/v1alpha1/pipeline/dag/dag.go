@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +17,9 @@ limitations under the License.
 package dag
 
 import (
-	"fmt"
-
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/pkg/list"
+	"golang.org/x/xerrors"
 )
 
 // GetSchedulable returns a map of PipelineTask that can be scheduled (keyed
@@ -48,7 +47,7 @@ func GetSchedulable(g *v1alpha1.DAG, doneTasks ...string) (map[string]v1alpha1.P
 
 	notVisited := list.DiffLeft(doneTasks, visitedNames)
 	if len(notVisited) > 0 {
-		return map[string]v1alpha1.PipelineTask{}, fmt.Errorf("invalid list of done tasks; some tasks were indicated completed without ancestors being done: %v", notVisited)
+		return map[string]v1alpha1.PipelineTask{}, xerrors.Errorf("invalid list of done tasks; some tasks were indicated completed without ancestors being done: %v", notVisited)
 	}
 
 	return d, nil

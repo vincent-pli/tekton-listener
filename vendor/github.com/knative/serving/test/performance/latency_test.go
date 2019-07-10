@@ -28,8 +28,10 @@ import (
 	pkgTest "github.com/knative/pkg/test"
 	ingress "github.com/knative/pkg/test/ingress"
 	"github.com/knative/serving/test"
+	v1a1test "github.com/knative/serving/test/v1alpha1"
 	"github.com/knative/test-infra/shared/junit"
 	"github.com/knative/test-infra/shared/loadgenerator"
+	perf "github.com/knative/test-infra/shared/performance"
 	"github.com/knative/test-infra/shared/testgrid"
 )
 
@@ -58,7 +60,7 @@ func timeToServe(t *testing.T, img, query string, reqTimeout time.Duration) {
 	test.CleanupOnInterrupt(func() { TearDown(perfClients, names, t.Logf) })
 
 	t.Log("Creating a new Service")
-	objs, err := test.CreateRunLatestServiceReady(t, clients, &names, &test.Options{})
+	objs, err := v1a1test.CreateRunLatestServiceReady(t, clients, &names, &v1a1test.Options{})
 	if err != nil {
 		t.Fatalf("Failed to create Service: %v", err)
 	}
@@ -73,7 +75,7 @@ func timeToServe(t *testing.T, img, query string, reqTimeout time.Duration) {
 		clients.KubeClient,
 		t.Logf,
 		domain,
-		test.RetryingRouteInconsistency(pkgTest.IsStatusOK),
+		v1a1test.RetryingRouteInconsistency(pkgTest.IsStatusOK),
 		"WaitForSuccessfulResponse",
 		test.ServingFlags.ResolvableDomain); err != nil {
 		t.Fatalf("Error probing domain %s: %v", domain, err)
@@ -89,7 +91,7 @@ func timeToServe(t *testing.T, img, query string, reqTimeout time.Duration) {
 		LoadFactors:    []float64{1},
 		FileNamePrefix: tName,
 	}
-	resp, err := opts.RunLoadTest(false)
+	resp, err := opts.RunLoadTest(loadgenerator.AddHostHeader)
 	if err != nil {
 		t.Fatalf("Generating traffic via fortio failed: %v", err)
 	}
@@ -101,7 +103,7 @@ func timeToServe(t *testing.T, img, query string, reqTimeout time.Duration) {
 		t.Fatal("No result found for the load test")
 	}
 
-	if ErrorsPercentage(resp) > 0 {
+	if resp.ErrorsPercentage(0) > 0 {
 		t.Fatal("Found non 200 response")
 	}
 
@@ -110,7 +112,7 @@ func timeToServe(t *testing.T, img, query string, reqTimeout time.Duration) {
 	for _, p := range resp.Result[0].DurationHistogram.Percentiles {
 		val := float32(p.Value) * 1000
 		name := fmt.Sprintf("p%d(ms)", int(p.Percentile))
-		tc = append(tc, CreatePerfTestCase(val, name, tName))
+		tc = append(tc, perf.CreatePerfTestCase(val, name, tName))
 	}
 
 	if err = testgrid.CreateXMLOutput(tc, tName); err != nil {

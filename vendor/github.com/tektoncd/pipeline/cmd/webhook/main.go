@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,23 +17,27 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 
-	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
-
-	"go.uber.org/zap"
-
 	"github.com/knative/pkg/configmap"
+	"github.com/knative/pkg/logging"
 	"github.com/knative/pkg/logging/logkey"
 	"github.com/knative/pkg/signals"
 	"github.com/knative/pkg/webhook"
-	"github.com/tektoncd/pipeline/pkg/logging"
+	apiconfig "github.com/tektoncd/pipeline/pkg/apis/config"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
+	tklogging "github.com/tektoncd/pipeline/pkg/logging"
 	"github.com/tektoncd/pipeline/pkg/system"
+	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
+
+// WebhookLogKey is the name of the logger for the webhook cmd
+const WebhookLogKey = "webhook"
 
 func main() {
 	flag.Parse()
@@ -45,7 +49,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing logging configuration: %v", err)
 	}
-	logger, atomicLevel := logging.NewLoggerFromConfig(config, logging.WebhookLogKey)
+	logger, atomicLevel := logging.NewLoggerFromConfig(config, WebhookLogKey)
 	defer logger.Sync()
 	logger = logger.With(zap.String(logkey.ControllerType, "webhook"))
 
@@ -65,7 +69,11 @@ func main() {
 	}
 	// Watch the logging config map and dynamically update logging levels.
 	configMapWatcher := configmap.NewInformedWatcher(kubeClient, system.GetNamespace())
-	configMapWatcher.Watch(logging.ConfigName, logging.UpdateLevelFromConfigMap(logger, atomicLevel, logging.WebhookLogKey))
+	configMapWatcher.Watch(tklogging.ConfigName, logging.UpdateLevelFromConfigMap(logger, atomicLevel, WebhookLogKey))
+
+	store := apiconfig.NewStore(logger.Named("config-store"))
+	store.WatchConfigs(configMapWatcher)
+
 	if err = configMapWatcher.Start(stopCh); err != nil {
 		logger.Fatalf("failed to start configuration manager: %v", err)
 	}
@@ -90,6 +98,11 @@ func main() {
 			v1alpha1.SchemeGroupVersion.WithKind("PipelineRun"):      &v1alpha1.PipelineRun{},
 		},
 		Logger: logger,
+
+		// Decorate contexts with the current state of the config.
+		WithContext: func(ctx context.Context) context.Context {
+			return v1alpha1.WithDefaultConfigurationName(store.ToContext(ctx))
+		},
 	}
 
 	if err := controller.Run(stopCh); err != nil {

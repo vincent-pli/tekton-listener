@@ -37,7 +37,6 @@ import (
 	"github.com/knative/serving/pkg/apis/serving"
 	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	"github.com/knative/serving/pkg/reconciler/route/config"
-	"github.com/knative/serving/pkg/reconciler/route/domains"
 	"github.com/knative/serving/pkg/reconciler/route/resources"
 	resourcenames "github.com/knative/serving/pkg/reconciler/route/resources/names"
 	"github.com/knative/serving/pkg/reconciler/route/traffic"
@@ -104,8 +103,6 @@ func (c *Reconciler) reconcileClusterIngress(
 	} else if err != nil {
 		return nil, err
 	} else {
-		// TODO(#642): Remove this (needed to avoid continuous updates)
-		desired.Spec.DeprecatedGeneration = clusterIngress.Spec.DeprecatedGeneration
 		// It is notable that one reason for differences here may be defaulting.
 		// When that is the case, the Update will end up being a nop because the
 		// webhook will bring them into alignment and no new reconciliation will occur.
@@ -167,7 +164,6 @@ func (c *Reconciler) reconcilePlaceholderServices(ctx context.Context, route *v1
 
 	var services []*corev1.Service
 	for _, name := range names.List() {
-		desiredServiceName := domains.SubdomainName(route, name)
 		desiredService, err := resources.MakeK8sPlaceholderService(ctx, route, name)
 		if err != nil {
 			logger.Warnw("Failed to construct placeholder k8s service", zap.Error(err))
@@ -181,21 +177,21 @@ func (c *Reconciler) reconcilePlaceholderServices(ctx context.Context, route *v1
 			if err != nil {
 				logger.Errorw("Failed to create placeholder service", zap.Error(err))
 				c.Recorder.Eventf(route, corev1.EventTypeWarning, "CreationFailed",
-					"Failed to create placeholder service %q: %v", desiredServiceName, err)
+					"Failed to create placeholder service %q: %v", desiredService.Name, err)
 				return nil, err
 			}
-			logger.Infof("Created service %s", desiredServiceName)
-			c.Recorder.Eventf(route, corev1.EventTypeNormal, "Created", "Created placeholder service %q", desiredServiceName)
+			logger.Infof("Created service %s", desiredService.Name)
+			c.Recorder.Eventf(route, corev1.EventTypeNormal, "Created", "Created placeholder service %q", desiredService.Name)
 		} else if err != nil {
 			return nil, err
 		} else if !metav1.IsControlledBy(service, route) {
 			// Surface an error in the route's status, and return an error.
-			route.Status.MarkServiceNotOwned(desiredServiceName)
-			return nil, fmt.Errorf("route: %q does not own Service: %q", route.Name, desiredServiceName)
+			route.Status.MarkServiceNotOwned(desiredService.Name)
+			return nil, fmt.Errorf("route: %q does not own Service: %q", route.Name, desiredService.Name)
 		}
 
 		services = append(services, service)
-		delete(currentServices, desiredServiceName)
+		delete(currentServices, desiredService.Name)
 	}
 
 	// Delete any current services that was no longer desired.
@@ -212,29 +208,34 @@ func (c *Reconciler) updatePlaceholderServices(ctx context.Context, route *v1alp
 	logger := logging.FromContext(ctx)
 	ns := route.Namespace
 
+	eg, _ := errgroup.WithContext(ctx)
 	for _, service := range services {
-		desiredService, err := resources.MakeK8sService(route, service.Name, ingress)
-		if err != nil {
-			// Loadbalancer not ready, no need to update.
-			logger.Warnf("Failed to update k8s service: %v", err)
-			return nil
-		}
-
-		// Make sure that the service has the proper specification.
-		if !equality.Semantic.DeepEqual(service.Spec, desiredService.Spec) {
-			// Don't modify the informers copy
-			existing := service.DeepCopy()
-			existing.Spec = desiredService.Spec
-			_, err = c.KubeClientSet.CoreV1().Services(ns).Update(existing)
+		service := service
+		eg.Go(func() error {
+			desiredService, err := resources.MakeK8sService(ctx, route, service.Name, ingress)
 			if err != nil {
-				return err
+				// Loadbalancer not ready, no need to update.
+				logger.Warnf("Failed to update k8s service: %v", err)
+				return nil
 			}
-		}
+
+			// Make sure that the service has the proper specification.
+			if !equality.Semantic.DeepEqual(service.Spec, desiredService.Spec) {
+				// Don't modify the informers copy
+				existing := service.DeepCopy()
+				existing.Spec = desiredService.Spec
+				_, err = c.KubeClientSet.CoreV1().Services(ns).Update(existing)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
 
 	// TODO(mattmoor): This is where we'd look at the state of the Service and
 	// reflect any necessary state into the Route.
-	return nil
+	return eg.Wait()
 }
 
 // Update the Status of the route.  Caller is responsible for checking
@@ -325,7 +326,7 @@ func (c *Reconciler) reconcileCertificate(ctx context.Context, r *v1alpha1.Route
 	} else if !metav1.IsControlledBy(cert, r) {
 		// Surface an error in the route's status, and return an error.
 		r.Status.MarkCertificateNotOwned(cert.Name)
-		return nil, fmt.Errorf("Route: %s does not own Certificate: %s", r.Name, cert.Name)
+		return nil, fmt.Errorf("route: %s does not own certificate: %s", r.Name, cert.Name)
 	} else {
 		if !equality.Semantic.DeepEqual(cert.Spec, desiredCert.Spec) {
 			// Don't modify the informers copy

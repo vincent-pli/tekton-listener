@@ -27,6 +27,7 @@ spec:
   template:
     metadata:
       annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
         sidecar.istio.io/inject: "true"
       labels:
         app: activator
@@ -90,11 +91,17 @@ spec:
                 fieldPath: metadata.namespace
           - name: CONFIG_LOGGING_NAME
             value: config-logging
+          - name: CONFIG_OBSERVABILITY_NAME
+            value: config-observability
+          - name: METRICS_DOMAIN
+            value: knative.dev/serving
         volumeMounts:
         - name: config-logging
           mountPath: /etc/config-logging
         - name: config-observability
           mountPath: /etc/config-observability
+        securityContext:
+          allowPrivilegeEscalation: false
       volumes:
         - name: config-logging
           configMap:

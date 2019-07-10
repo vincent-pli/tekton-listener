@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/internal/testutil"
+	"cloud.google.com/go/internal/uid"
 	"cloud.google.com/go/rpcreplay"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -1274,5 +1275,44 @@ func TestIntegration_DetectProjectID(t *testing.T) {
 	_, err := NewClient(ctx, DetectProjectID, option.WithTokenSource(ts))
 	if err == nil || err.Error() != "datastore: see the docs on DetectProjectID" {
 		t.Errorf("expected an error while using TokenSource that does not have a project ID")
+	}
+}
+
+var genKeyName = uid.NewSpace("datastore-integration", nil)
+
+func TestIntegration_Project_TimestampStoreAndRetrieve(t *testing.T) {
+	t.Skip("https://github.com/googleapis/google-cloud-go/issues/1479")
+
+	ctx := context.Background()
+	client := newTestClient(ctx, t)
+	defer client.Close()
+
+	type T struct{ Created time.Time }
+
+	// We need to generate a new key to prevent any clashes with concurrent test runs,
+	// as per:  https://github.com/googleapis/google-cloud-go/issues/1479
+	keyName := genKeyName.New()
+
+	now := time.Now()
+	k, err := client.Put(ctx, IncompleteKey(keyName, nil), &T{Created: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := client.Delete(ctx, k); err != nil {
+			log.Println(err)
+		}
+	}()
+
+	q := NewQuery(keyName).Order("Created").Project("Created")
+	res := []T{}
+	if _, err := client.GetAll(ctx, q, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(res))
+	}
+	if got, want := res[0].Created.Unix(), now.Unix(); got != want {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

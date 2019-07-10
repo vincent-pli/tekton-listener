@@ -26,12 +26,11 @@ import (
 	"github.com/knative/pkg/controller"
 	"github.com/knative/pkg/kmp"
 	"github.com/knative/pkg/logging"
-	"github.com/knative/serving/pkg/apis/serving"
 	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	"github.com/knative/serving/pkg/apis/serving/v1beta1"
-	servinginformers "github.com/knative/serving/pkg/client/informers/externalversions/serving/v1alpha1"
 	listers "github.com/knative/serving/pkg/client/listers/serving/v1alpha1"
 	"github.com/knative/serving/pkg/reconciler"
+	cfgreconciler "github.com/knative/serving/pkg/reconciler/configuration"
 	"github.com/knative/serving/pkg/reconciler/service/resources"
 	resourcenames "github.com/knative/serving/pkg/reconciler/service/resources/names"
 	"go.uber.org/zap"
@@ -41,14 +40,11 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
-
-	cfgreconciler "github.com/knative/serving/pkg/reconciler/configuration"
 )
 
 const (
 	// ReconcilerName is the name of the reconciler
-	ReconcilerName      = "Services"
-	controllerAgentName = "service-controller"
+	ReconcilerName = "Services"
 )
 
 // Reconciler implements controller.Reconciler for Service resources.
@@ -64,41 +60,6 @@ type Reconciler struct {
 
 // Check that our Reconciler implements controller.Reconciler
 var _ controller.Reconciler = (*Reconciler)(nil)
-
-// NewController initializes the controller and is called by the generated code
-// Registers eventhandlers to enqueue events
-func NewController(
-	opt reconciler.Options,
-	serviceInformer servinginformers.ServiceInformer,
-	configurationInformer servinginformers.ConfigurationInformer,
-	revisionInformer servinginformers.RevisionInformer,
-	routeInformer servinginformers.RouteInformer,
-) *controller.Impl {
-
-	c := &Reconciler{
-		Base:                reconciler.NewBase(opt, controllerAgentName),
-		serviceLister:       serviceInformer.Lister(),
-		configurationLister: configurationInformer.Lister(),
-		revisionLister:      revisionInformer.Lister(),
-		routeLister:         routeInformer.Lister(),
-	}
-	impl := controller.NewImpl(c, c.Logger, ReconcilerName, reconciler.MustNewStatsReporter(ReconcilerName, c.Logger))
-
-	c.Logger.Info("Setting up event handlers")
-	serviceInformer.Informer().AddEventHandler(reconciler.Handler(impl.Enqueue))
-
-	configurationInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: controller.Filter(v1alpha1.SchemeGroupVersion.WithKind("Service")),
-		Handler:    reconciler.Handler(impl.EnqueueControllerOf),
-	})
-
-	routeInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: controller.Filter(v1alpha1.SchemeGroupVersion.WithKind("Service")),
-		Handler:    reconciler.Handler(impl.EnqueueControllerOf),
-	})
-
-	return impl
-}
 
 // Reconcile compares the actual state with the desired, and attempts to
 // converge the two. It then updates the Status block of the Service resource
@@ -129,27 +90,9 @@ func (c *Reconciler) Reconcile(ctx context.Context, key string) error {
 	// Don't modify the informers copy
 	service := original.DeepCopy()
 
-	var reconcileErr error
-
-	if service.Spec.DeprecatedManual != nil {
-		// We do not know the status when in manual mode. The Route can be
-		// updated with Configurations not known to the Service which would
-		// make attempts to display status potentially incorrect
-		service.Status.SetManualStatus()
-
-		if err := service.ConvertUp(ctx, &v1beta1.Service{}); err != nil {
-			if ce, ok := err.(*v1alpha1.CannotConvertError); ok {
-				service.Status.MarkResourceNotConvertible(ce)
-			} else {
-				return err
-			}
-		}
-	} else {
-		// Reconcile this copy of the service and then write back any status
-		// updates regardless of whether the reconciliation errored out.
-		reconcileErr = c.reconcile(ctx, service)
-	}
-
+	// Reconcile this copy of the service and then write back any status
+	// updates regardless of whether the reconciliation errored out.
+	reconcileErr := c.reconcile(ctx, service)
 	if equality.Semantic.DeepEqual(original.Status, service.Status) {
 		// If we didn't change anything then don't call updateStatus.
 		// This is important because the copy we loaded from the informer's
@@ -167,8 +110,19 @@ func (c *Reconciler) Reconcile(ctx context.Context, key string) error {
 	}
 	if reconcileErr != nil {
 		c.Recorder.Event(service, corev1.EventTypeWarning, "InternalError", reconcileErr.Error())
+		return reconcileErr
 	}
-	return reconcileErr
+	// TODO(mattmoor): Remove this after 0.7 cuts.
+	// If the spec has changed, then assume we need an upgrade and issue a patch to trigger
+	// the webhook to upgrade via defaulting.  Status updates do not trigger this due to the
+	// use of the /status resource.
+	if !equality.Semantic.DeepEqual(original.Spec, service.Spec) {
+		services := v1alpha1.SchemeGroupVersion.WithResource("services")
+		if err := c.MarkNeedsUpgrade(services, service.Namespace, service.Name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Reconciler) reconcile(ctx context.Context, service *v1alpha1.Service) error {
@@ -178,15 +132,15 @@ func (c *Reconciler) reconcile(ctx context.Context, service *v1alpha1.Service) e
 	// and may not have had all of the assumed defaults specified.  This won't result
 	// in this getting written back to the API Server, but lets downstream logic make
 	// assumptions about defaulting.
-	service.SetDefaults(ctx)
+	service.SetDefaults(v1beta1.WithUpgradeViaDefaulting(ctx))
 	service.Status.InitializeConditions()
 
 	if err := service.ConvertUp(ctx, &v1beta1.Service{}); err != nil {
 		if ce, ok := err.(*v1alpha1.CannotConvertError); ok {
 			service.Status.MarkResourceNotConvertible(ce)
-		} else {
-			return err
+			return nil
 		}
+		return err
 	}
 
 	configName := resourcenames.Configuration(service)
@@ -207,7 +161,7 @@ func (c *Reconciler) reconcile(ctx context.Context, service *v1alpha1.Service) e
 	} else if !metav1.IsControlledBy(config, service) {
 		// Surface an error in the service's status,and return an error.
 		service.Status.MarkConfigurationNotOwned(configName)
-		return fmt.Errorf("Service: %q does not own Configuration: %q", service.Name, configName)
+		return fmt.Errorf("service: %q does not own configuration: %q", service.Name, configName)
 	} else if config, err = c.reconcileConfiguration(ctx, service, config); err != nil {
 		logger.Errorw(
 			fmt.Sprintf("Failed to reconcile Service: %q failed to reconcile Configuration: %q",
@@ -215,8 +169,14 @@ func (c *Reconciler) reconcile(ctx context.Context, service *v1alpha1.Service) e
 		return err
 	}
 
-	// Update our Status based on the state of our underlying Configuration.
-	service.Status.PropagateConfigurationStatus(&config.Status)
+	if config.Generation != config.Status.ObservedGeneration {
+		// The Configuration hasn't yet reconciled our latest changes to
+		// its desired state, so its conditions are outdated.
+		service.Status.MarkConfigurationNotReconciled()
+	} else {
+		// Update our Status based on the state of our underlying Configuration.
+		service.Status.PropagateConfigurationStatus(&config.Status)
+	}
 
 	// When the Configuration names a Revision, check that the named Revision is owned
 	// by our Configuration and matches its generation before reprogramming the Route,
@@ -244,15 +204,21 @@ func (c *Reconciler) reconcile(ctx context.Context, service *v1alpha1.Service) e
 	} else if !metav1.IsControlledBy(route, service) {
 		// Surface an error in the service's status, and return an error.
 		service.Status.MarkRouteNotOwned(routeName)
-		return fmt.Errorf("Service: %q does not own Route: %q", service.Name, routeName)
+		return fmt.Errorf("service: %q does not own route: %q", service.Name, routeName)
 	} else if route, err = c.reconcileRoute(ctx, service, route); err != nil {
 		logger.Errorf("Failed to reconcile Service: %q failed to reconcile Route: %q", service.Name, routeName)
 		return err
 	}
 
-	// Update our Status based on the state of our underlying Route.
 	ss := &service.Status
-	ss.PropagateRouteStatus(&route.Status)
+	if route.Generation != route.Status.ObservedGeneration {
+		// The Route hasn't yet reconciled our latest changes to
+		// its desired state, so its conditions are outdated.
+		ss.MarkRouteNotReconciled()
+	} else {
+		// Update our Status based on the state of our underlying Route.
+		ss.PropagateRouteStatus(&route.Status)
+	}
 
 	// `manual` is not reconciled.
 	rc := service.Status.GetCondition(v1alpha1.ServiceConditionRoutesReady)
@@ -319,20 +285,8 @@ func (c *Reconciler) createConfiguration(service *v1alpha1.Service) (*v1alpha1.C
 
 func configSemanticEquals(desiredConfig, config *v1alpha1.Configuration) bool {
 	return equality.Semantic.DeepEqual(desiredConfig.Spec, config.Spec) &&
-		equality.Semantic.DeepEqual(desiredConfig.ObjectMeta.Labels, config.ObjectMeta.Labels)
-}
-
-// ignoreRouteLabelChange sets desiredConfig[serving.RouteLabelKey] to
-// same as config[serving.RouteLabelKey], so that we do nothing about
-// the configuration label serving.RouteLabelKey in our
-// reconciliation.
-func ignoreRouteLabelChange(desiredConfig, config *v1alpha1.Configuration) {
-	routeLabel, existed := config.ObjectMeta.Labels[serving.RouteLabelKey]
-	if !existed {
-		delete(desiredConfig.ObjectMeta.Labels, serving.RouteLabelKey)
-	} else {
-		desiredConfig.ObjectMeta.Labels[serving.RouteLabelKey] = routeLabel
-	}
+		equality.Semantic.DeepEqual(desiredConfig.ObjectMeta.Labels, config.ObjectMeta.Labels) &&
+		equality.Semantic.DeepEqual(desiredConfig.ObjectMeta.Annotations, config.ObjectMeta.Annotations)
 }
 
 func (c *Reconciler) reconcileConfiguration(ctx context.Context, service *v1alpha1.Service, config *v1alpha1.Configuration) (*v1alpha1.Configuration, error) {
@@ -341,14 +295,6 @@ func (c *Reconciler) reconcileConfiguration(ctx context.Context, service *v1alph
 	if err != nil {
 		return nil, err
 	}
-	// Route label is automatically set by another reconciler.  We
-	// want to ignore that label in our reconciliation here by setting
-	// desiredConfig[serving.RouteLabelKey] to the same as
-	// config[serving.RouteLabelKey].
-	ignoreRouteLabelChange(desiredConfig, config)
-
-	// TODO(#642): Remove this (needed to avoid continuous updates)
-	desiredConfig.Spec.DeprecatedGeneration = config.Spec.DeprecatedGeneration
 
 	if configSemanticEquals(desiredConfig, config) {
 		// No differences to reconcile.
@@ -365,6 +311,7 @@ func (c *Reconciler) reconcileConfiguration(ctx context.Context, service *v1alph
 	// Preserve the rest of the object (e.g. ObjectMeta except for labels).
 	existing.Spec = desiredConfig.Spec
 	existing.ObjectMeta.Labels = desiredConfig.ObjectMeta.Labels
+	existing.ObjectMeta.Annotations = desiredConfig.ObjectMeta.Annotations
 	return c.ServingClientSet.ServingV1alpha1().Configurations(service.Namespace).Update(existing)
 }
 
@@ -381,7 +328,8 @@ func (c *Reconciler) createRoute(service *v1alpha1.Service) (*v1alpha1.Route, er
 
 func routeSemanticEquals(desiredRoute, route *v1alpha1.Route) bool {
 	return equality.Semantic.DeepEqual(desiredRoute.Spec, route.Spec) &&
-		equality.Semantic.DeepEqual(desiredRoute.ObjectMeta.Labels, route.ObjectMeta.Labels)
+		equality.Semantic.DeepEqual(desiredRoute.ObjectMeta.Labels, route.ObjectMeta.Labels) &&
+		equality.Semantic.DeepEqual(desiredRoute.ObjectMeta.Annotations, route.ObjectMeta.Annotations)
 }
 
 func (c *Reconciler) reconcileRoute(ctx context.Context, service *v1alpha1.Service, route *v1alpha1.Route) (*v1alpha1.Route, error) {
@@ -393,9 +341,6 @@ func (c *Reconciler) reconcileRoute(ctx context.Context, service *v1alpha1.Servi
 		// that would make `MakeRoute` fail as well.
 		return nil, err
 	}
-
-	// TODO(#642): Remove this (needed to avoid continuous updates).
-	desiredRoute.Spec.DeprecatedGeneration = route.Spec.DeprecatedGeneration
 
 	if routeSemanticEquals(desiredRoute, route) {
 		// No differences to reconcile.
@@ -409,8 +354,9 @@ func (c *Reconciler) reconcileRoute(ctx context.Context, service *v1alpha1.Servi
 
 	// Don't modify the informers copy.
 	existing := route.DeepCopy()
-	// Preserve the rest of the object (e.g. ObjectMeta except for labels).
+	// Preserve the rest of the object (e.g. ObjectMeta except for labels and annotations).
 	existing.Spec = desiredRoute.Spec
 	existing.ObjectMeta.Labels = desiredRoute.ObjectMeta.Labels
+	existing.ObjectMeta.Annotations = desiredRoute.ObjectMeta.Annotations
 	return c.ServingClientSet.ServingV1alpha1().Routes(service.Namespace).Update(existing)
 }

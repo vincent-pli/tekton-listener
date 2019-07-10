@@ -1,4 +1,4 @@
-# Copyright 2018 The Knative Authors
+# Copyright 2019 The Tekton Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ spec:
   replicas: 1
   template:
     metadata:
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
       labels:
         app: tekton-pipelines-controller
     spec:
@@ -38,6 +40,7 @@ spec:
           "-gsutil-image","github.com/tektoncd/pipeline/cmd/gsutil",
           "-entrypoint-image", "github.com/tektoncd/pipeline/cmd/entrypoint",
           "-imagedigest-exporter-image", "github.com/tektoncd/pipeline/cmd/imagedigestexporter",
+          "-pr-image", "github.com/tektoncd/pipeline/cmd/pullrequest-init",
         ]
         volumeMounts:
         - name: config-logging

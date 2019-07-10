@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -59,7 +59,7 @@ func TestPipeline(t *testing.T) {
 				Name: "my-only-image-resource",
 				Type: "image",
 			}},
-			Params: []v1alpha1.PipelineParam{{
+			Params: []v1alpha1.ParamSpec{{
 				Name:        "first-param",
 				Default:     "default-value",
 				Description: "default description",
@@ -101,8 +101,9 @@ func TestPipelineRun(t *testing.T) {
 	pipelineRun := tb.PipelineRun("pear", "foo", tb.PipelineRunSpec(
 		"tomatoes", tb.PipelineRunServiceAccount("sa"),
 		tb.PipelineRunParam("first-param", "first-value"),
-		tb.PipelineRunTimeout(&metav1.Duration{Duration: 1 * time.Hour}),
+		tb.PipelineRunTimeout(1*time.Hour),
 		tb.PipelineRunResourceBinding("some-resource", tb.PipelineResourceBindingRef("my-special-resource")),
+		tb.PipelineRunServiceAccountTask("foo", "sa-2"),
 	), tb.PipelineRunStatus(tb.PipelineRunStatusCondition(
 		apis.Condition{Type: apis.ConditionSucceeded}),
 		tb.PipelineRunStartTime(startTime),
@@ -117,8 +118,9 @@ func TestPipelineRun(t *testing.T) {
 			},
 		},
 		Spec: v1alpha1.PipelineRunSpec{
-			PipelineRef:    v1alpha1.PipelineRef{Name: "tomatoes"},
-			ServiceAccount: "sa",
+			PipelineRef:     v1alpha1.PipelineRef{Name: "tomatoes"},
+			ServiceAccount:  "sa",
+			ServiceAccounts: []v1alpha1.PipelineRunSpecServiceAccount{{TaskName: "foo", ServiceAccount: "sa-2"}},
 			Params: []v1alpha1.Param{{
 				Name:  "first-param",
 				Value: "first-value",

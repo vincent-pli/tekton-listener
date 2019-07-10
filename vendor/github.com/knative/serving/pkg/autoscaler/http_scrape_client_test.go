@@ -19,14 +19,14 @@ package autoscaler
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"testing"
-	"time"
 )
 
 const (
-	testURL = "http://test-revision-metrics.test-namespace:9090/metrics"
+	testURL = "http://test-revision-zhudex.test-namespace:9090/metrics"
 
 	// TODO: Use Prometheus lib to generate the following text instead of using text format directly.
 	testAverageConcurrencyContext = `# HELP queue_average_concurrent_requests Number of requests currently being handled by this pod
@@ -80,8 +80,6 @@ func TestHTTPScrapeClient_Scrape_HappyCase(t *testing.T) {
 		t.Fatalf("newHTTPScrapeClient = %v, want no error", err)
 	}
 
-	// Scrape will set a timestamp bigger than this.
-	now := time.Now()
 	stat, err := sClient.Scrape(testURL)
 	if err != nil {
 		t.Errorf("scrapeViaURL = %v, want no error", err)
@@ -98,9 +96,6 @@ func TestHTTPScrapeClient_Scrape_HappyCase(t *testing.T) {
 	if stat.ProxiedRequestCount != 4 {
 		t.Errorf("stat.ProxiedCount = %v, want 4", stat.ProxiedRequestCount)
 	}
-	if stat.Time.Before(now) {
-		t.Errorf("stat.Time=%v, want bigger than %v", stat.Time, now)
-	}
 }
 
 func TestHTTPScrapeClient_Scrape_ErrorCases(t *testing.T) {
@@ -113,12 +108,12 @@ func TestHTTPScrapeClient_Scrape_ErrorCases(t *testing.T) {
 	}{{
 		name:         "Non 200 return code",
 		responseCode: http.StatusForbidden,
-		expectedErr:  `GET request for URL "http://test-revision-metrics.test-namespace:9090/metrics" returned HTTP status 403`,
+		expectedErr:  fmt.Sprintf(`GET request for URL "%s" returned HTTP status 403`, testURL),
 	}, {
 		name:         "Error got when sending request",
 		responseCode: http.StatusOK,
 		responseErr:  errors.New("upstream closed"),
-		expectedErr:  "Get http://test-revision-metrics.test-namespace:9090/metrics: upstream closed",
+		expectedErr:  fmt.Sprintf("Get %s: upstream closed", testURL),
 	}, {
 		name:            "Bad response context format",
 		responseCode:    http.StatusOK,

@@ -22,6 +22,10 @@ import (
 	"testing"
 	"time"
 
+	// Inject the fake informers we need.
+	_ "github.com/knative/serving/pkg/client/injection/informers/serving/v1alpha1/configuration/fake"
+	_ "github.com/knative/serving/pkg/client/injection/informers/serving/v1alpha1/revision/fake"
+
 	duckv1beta1 "github.com/knative/pkg/apis/duck/v1beta1"
 	"github.com/knative/pkg/configmap"
 	"github.com/knative/pkg/controller"
@@ -35,20 +39,22 @@ import (
 	"github.com/knative/serving/pkg/reconciler/configuration/resources"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgotesting "k8s.io/client-go/testing"
 
 	. "github.com/knative/pkg/reconciler/testing"
-	. "github.com/knative/serving/pkg/reconciler/testing"
+	. "github.com/knative/serving/pkg/reconciler/testing/v1alpha1"
+	. "github.com/knative/serving/pkg/testing/v1alpha1"
 )
 
 var revisionSpec = v1alpha1.RevisionSpec{
-	DeprecatedContainer: &corev1.Container{
-		Image: "busybox",
-	},
 	RevisionSpec: v1beta1.RevisionSpec{
+		PodSpec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Image: "busybox",
+			}},
+		},
 		TimeoutSeconds: ptr.Int64(60),
 	},
 }
@@ -75,7 +81,7 @@ func TestReconcile(t *testing.T) {
 		Objects: []runtime.Object{
 			cfg("no-revisions-yet", "foo", 1234),
 		},
-		WantCreates: []metav1.Object{
+		WantCreates: []runtime.Object{
 			rev("no-revisions-yet", "foo", 1234),
 		},
 		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
@@ -95,7 +101,7 @@ func TestReconcile(t *testing.T) {
 				cfg.Spec.GetTemplate().Name = "byo-name-create-foo"
 			}),
 		},
-		WantCreates: []metav1.Object{
+		WantCreates: []runtime.Object{
 			rev("byo-name-create", "foo", 1234, func(rev *v1alpha1.Revision) {
 				rev.Name = "byo-name-create-foo"
 				rev.GenerateName = ""
@@ -122,7 +128,7 @@ func TestReconcile(t *testing.T) {
 				// The following properties are set when we first reconcile a
 				// Configuration and a Revision is created.
 				WithLatestCreated("byo-name-exists-foo"), WithObservedGen),
-			rev("byo-name-exists", "foo", 1234, func(rev *v1alpha1.Revision) {
+			rev("byo-name-exists", "foo", 1234, WithCreationTimestamp(now), func(rev *v1alpha1.Revision) {
 				rev.Name = "byo-name-exists-foo"
 				rev.GenerateName = ""
 			}),
@@ -135,7 +141,7 @@ func TestReconcile(t *testing.T) {
 			cfg("byo-name-git-revert", "foo", 1234, func(cfg *v1alpha1.Configuration) {
 				cfg.Spec.GetTemplate().Name = "byo-name-git-revert-foo"
 			}),
-			rev("byo-name-git-revert", "foo", 1200, func(rev *v1alpha1.Revision) {
+			rev("byo-name-git-revert", "foo", 1200, WithCreationTimestamp(now), func(rev *v1alpha1.Revision) {
 				rev.Name = "byo-name-git-revert-foo"
 				rev.GenerateName = ""
 			}),
@@ -192,7 +198,7 @@ func TestReconcile(t *testing.T) {
 		Objects: []runtime.Object{
 			cfg("validation-failure", "foo", 1234, WithConfigContainerConcurrency(-1)),
 		},
-		WantCreates: []metav1.Object{
+		WantCreates: []runtime.Object{
 			rev("validation-failure", "foo", 1234, WithRevContainerConcurrency(-1)),
 		},
 		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
@@ -204,49 +210,9 @@ func TestReconcile(t *testing.T) {
 			Eventf(corev1.EventTypeWarning, "CreationFailed", "Failed to create Revision for Configuration %q: %v",
 				"validation-failure", "expected 0 <= -1 <= 1000: spec.containerConcurrency"),
 			Eventf(corev1.EventTypeWarning, "UpdateFailed", "Failed to update status for Configuration %q: %v",
-				"validation-failure", "expected 0 <= -1 <= 1000: spec.revisionTemplate.spec.containerConcurrency"),
+				"validation-failure", "expected 0 <= -1 <= 1000: spec.template.spec.containerConcurrency"),
 		},
 		Key: "foo/validation-failure",
-	}, {
-		Name: "elide build when a matching one already exists",
-		Objects: []runtime.Object{
-			cfg("need-rev-and-build", "foo", 99998, WithBuild),
-			// An existing build is reused!
-			build("something-else-12345", cfg("something-else", "foo", 12345, WithBuild)),
-		},
-		WantCreates: []metav1.Object{
-			rev("need-rev-and-build", "foo", 99998, WithBuildRef("something-else-12345")),
-		},
-		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
-			Object: cfg("need-rev-and-build", "foo", 99998, WithBuild, WithBuildWarning,
-				// The following properties are set when we first reconcile a Configuration
-				// that stamps out a Revision with an existing Build.
-				WithLatestCreated("need-rev-and-build-00001"), WithObservedGen),
-		}},
-		WantEvents: []string{
-			Eventf(corev1.EventTypeNormal, "Created", "Created Revision %q", "need-rev-and-build-00001"),
-		},
-		Key: "foo/need-rev-and-build",
-	}, {
-		Name: "create revision matching generation with build",
-		Objects: []runtime.Object{
-			cfg("need-rev-and-build", "foo", 99998, WithBuild),
-		},
-		WantCreates: []metav1.Object{
-			resources.MakeBuild(cfg("need-rev-and-build", "foo", 99998, WithBuild)),
-			rev("need-rev-and-build", "foo", 99998, WithBuildRef("need-rev-and-build-00001")),
-		},
-		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
-			Object: cfg("need-rev-and-build", "foo", 99998, WithBuild, WithBuildWarning,
-				// The following properties are set when we first reconcile a Configuration
-				// that stamps our a Revision and a Build.
-				WithLatestCreated("need-rev-and-build-00001"), WithObservedGen),
-		}},
-		WantEvents: []string{
-			Eventf(corev1.EventTypeNormal, "Created", "Created Build %q", "need-rev-and-build-00001"),
-			Eventf(corev1.EventTypeNormal, "Created", "Created Revision %q", "need-rev-and-build-00001"),
-		},
-		Key: "foo/need-rev-and-build",
 	}, {
 		Name: "reconcile revision matching generation (ready: unknown)",
 		Objects: []runtime.Object{
@@ -333,32 +299,6 @@ func TestReconcile(t *testing.T) {
 		},
 		Key: "foo/bad-condition",
 	}, {
-		Name: "failure creating build",
-		// We induce a failure creating a build
-		WantErr: true,
-		WithReactors: []clientgotesting.ReactionFunc{
-			InduceFailure("create", "builds"),
-		},
-		Objects: []runtime.Object{
-			cfg("create-build-failure", "foo", 99998, WithBuild),
-		},
-		WantCreates: []metav1.Object{
-			resources.MakeBuild(cfg("create-build-failure", "foo", 99998, WithBuild)),
-			// No Revision gets created.
-		},
-		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
-			Object: cfg("create-build-failure", "foo", 99998, WithBuild, WithBuildWarning,
-				// When we fail to create a Build it should be surfaced in
-				// the Configuration status.
-				MarkRevisionCreationFailed(`Failed to create Build for Configuration "create-build-failure": inducing failure for create builds`)),
-		}},
-		WantEvents: []string{
-			Eventf(corev1.EventTypeWarning, "CreationFailed", "Failed to create Revision for Configuration %q: %v",
-				"create-build-failure", fmt.Sprintf("Failed to create Build for Configuration %q: %v", "create-build-failure", "inducing failure for create builds")),
-			Eventf(corev1.EventTypeWarning, "InternalError", `Failed to create Build for Configuration "create-build-failure": inducing failure for create builds`),
-		},
-		Key: "foo/create-build-failure",
-	}, {
 		Name: "failure creating revision",
 		// We induce a failure creating a revision
 		WantErr: true,
@@ -368,7 +308,7 @@ func TestReconcile(t *testing.T) {
 		Objects: []runtime.Object{
 			cfg("create-revision-failure", "foo", 99998),
 		},
-		WantCreates: []metav1.Object{
+		WantCreates: []runtime.Object{
 			rev("create-revision-failure", "foo", 99998),
 		},
 		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
@@ -393,7 +333,7 @@ func TestReconcile(t *testing.T) {
 		Objects: []runtime.Object{
 			cfg("update-config-failure", "foo", 1234),
 		},
-		WantCreates: []metav1.Object{
+		WantCreates: []runtime.Object{
 			rev("update-config-failure", "foo", 1234),
 		},
 		WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
@@ -459,9 +399,9 @@ func TestReconcile(t *testing.T) {
 	}}
 
 	defer logtesting.ClearAll()
-	table.Test(t, MakeFactory(func(listers *Listers, opt reconciler.Options) controller.Reconciler {
+	table.Test(t, MakeFactory(func(ctx context.Context, listers *Listers, cmw configmap.Watcher) controller.Reconciler {
 		return &Reconciler{
-			Base:                reconciler.NewBase(opt, controllerAgentName),
+			Base:                reconciler.NewBase(ctx, controllerAgentName, cmw),
 			configurationLister: listers.GetConfigurationLister(),
 			revisionLister:      listers.GetRevisionLister(),
 			configStore: &testConfigStore{
@@ -597,9 +537,9 @@ func TestGCReconcile(t *testing.T) {
 	}}
 
 	defer logtesting.ClearAll()
-	table.Test(t, MakeFactory(func(listers *Listers, opt reconciler.Options) controller.Reconciler {
+	table.Test(t, MakeFactory(func(ctx context.Context, listers *Listers, cmw configmap.Watcher) controller.Reconciler {
 		return &Reconciler{
-			Base:                reconciler.NewBase(opt, controllerAgentName),
+			Base:                reconciler.NewBase(ctx, controllerAgentName, cmw),
 			configurationLister: listers.GetConfigurationLister(),
 			revisionLister:      listers.GetRevisionLister(),
 			configStore: &testConfigStore{
@@ -623,8 +563,7 @@ func cfg(name, namespace string, generation int64, co ...ConfigOption) *v1alpha1
 			Generation: generation,
 		},
 		Spec: v1alpha1.ConfigurationSpec{
-			DeprecatedGeneration: generation,
-			DeprecatedRevisionTemplate: &v1alpha1.RevisionTemplateSpec{
+			Template: &v1alpha1.RevisionTemplateSpec{
 				Spec: *revisionSpec.DeepCopy(),
 			},
 		},
@@ -637,17 +576,12 @@ func cfg(name, namespace string, generation int64, co ...ConfigOption) *v1alpha1
 }
 
 func rev(name, namespace string, generation int64, ro ...RevisionOption) *v1alpha1.Revision {
-	r := resources.MakeRevision(cfg(name, namespace, generation), nil)
+	r := resources.MakeRevision(cfg(name, namespace, generation))
+	r.SetDefaults(v1beta1.WithUpgradeViaDefaulting(context.Background()))
 	for _, opt := range ro {
 		opt(r)
 	}
 	return r
-}
-
-func build(name string, cfg *v1alpha1.Configuration) *unstructured.Unstructured {
-	build := resources.MakeBuild(cfg)
-	build.SetName(name)
-	return build
 }
 
 type testConfigStore struct {
@@ -658,9 +592,7 @@ func (t *testConfigStore) ToContext(ctx context.Context) context.Context {
 	return config.ToContext(ctx, t.config)
 }
 
-func (t *testConfigStore) WatchConfigs(w configmap.Watcher) {}
-
-var _ configStore = (*testConfigStore)(nil)
+var _ reconciler.ConfigStore = (*testConfigStore)(nil)
 
 func ReconcilerTestConfig() *config.Config {
 	return &config.Config{
@@ -690,14 +622,39 @@ func TestIsRevisionStale(t *testing.T) {
 		},
 		want: false,
 	}, {
-		name: "stale revision that was never pinned",
+		name: "stale revision that was never pinned w/ Ready status",
 		rev: &v1alpha1.Revision{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "myrev",
 				CreationTimestamp: metav1.NewTime(staleTime),
 			},
+			Status: v1alpha1.RevisionStatus{
+				Status: duckv1beta1.Status{
+					Conditions: duckv1beta1.Conditions{{
+						Type:   v1alpha1.RevisionConditionReady,
+						Status: "True",
+					}},
+				},
+			},
 		},
 		want: false,
+	}, {
+		name: "stale revision that was never pinned w/o Ready status",
+		rev: &v1alpha1.Revision{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "myrev",
+				CreationTimestamp: metav1.NewTime(staleTime),
+			},
+			Status: v1alpha1.RevisionStatus{
+				Status: duckv1beta1.Status{
+					Conditions: duckv1beta1.Conditions{{
+						Type:   v1alpha1.RevisionConditionReady,
+						Status: "Unknown",
+					}},
+				},
+			},
+		},
+		want: true,
 	}, {
 		name: "stale revision that was previously pinned",
 		rev: &v1alpha1.Revision{
@@ -765,10 +722,4 @@ func TestIsRevisionStale(t *testing.T) {
 			}
 		})
 	}
-}
-
-// WithBuildWarning adds a Warning condition for the Build
-func WithBuildWarning(c *v1alpha1.Configuration) {
-	c.Status.MarkResourceNotConvertible(v1alpha1.ConvertErrorf("build",
-		"build cannot be migrated forward.").(*v1alpha1.CannotConvertError))
 }

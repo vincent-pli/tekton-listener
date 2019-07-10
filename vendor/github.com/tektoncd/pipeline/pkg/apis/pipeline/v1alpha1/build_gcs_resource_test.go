@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors.
+Copyright 2019 The Tekton Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,141 +14,73 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha1_test
 
 import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/test/names"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	tb "github.com/tektoncd/pipeline/test/builder"
 )
 
 func Test_Invalid_BuildGCSResource(t *testing.T) {
 	testcases := []struct {
 		name             string
-		pipelineResource *PipelineResource
+		pipelineResource *v1alpha1.PipelineResource
 	}{{
 		name: "no location params",
-		pipelineResource: &PipelineResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "buildgcs-resource-with-no-location-param",
-			},
-			Spec: PipelineResourceSpec{
-				Type: PipelineResourceTypeStorage,
-				Params: []Param{{
-					Name:  "NotLocation",
-					Value: "doesntmatter",
-				}, {
-					Name:  "type",
-					Value: "build-gcs",
-				}},
-			},
-		},
+		pipelineResource: tb.PipelineResource("buildgcs-resource-with-no-location-param", "default", tb.PipelineResourceSpec(
+			v1alpha1.PipelineResourceTypeStorage,
+			tb.PipelineResourceSpecParam("NotLocation", "doesntmatter"),
+			tb.PipelineResourceSpecParam("type", "build-gcs"),
+		)),
 	}, {
 		name: "location param with empty value",
-		pipelineResource: &PipelineResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "gcs-resource-with-empty-location-param",
-			},
-			Spec: PipelineResourceSpec{
-				Type: PipelineResourceTypeStorage,
-				Params: []Param{{
-					Name:  "Location",
-					Value: "",
-				}, {
-					Name:  "type",
-					Value: "build-gcs",
-				}},
-			},
-		},
+		pipelineResource: tb.PipelineResource("buildgcs-resource-with-empty-location-param", "default", tb.PipelineResourceSpec(
+			v1alpha1.PipelineResourceTypeStorage,
+			tb.PipelineResourceSpecParam("Location", ""),
+			tb.PipelineResourceSpecParam("type", "build-gcs"),
+		)),
 	}, {
 		name: "no artifactType params",
-		pipelineResource: &PipelineResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "buildgcs-resource-with-no-artifactType-param",
-			},
-			Spec: PipelineResourceSpec{
-				Type: PipelineResourceTypeStorage,
-				Params: []Param{{
-					Name:  "Location",
-					Value: "gs://test",
-				}, {
-					Name:  "type",
-					Value: "build-gcs",
-				}},
-			},
-		},
+		pipelineResource: tb.PipelineResource("buildgcs-resource-with-no-artifactType-param", "default", tb.PipelineResourceSpec(
+			v1alpha1.PipelineResourceTypeStorage,
+			tb.PipelineResourceSpecParam("Location", "gs://test"),
+			tb.PipelineResourceSpecParam("type", "build-gcs"),
+		)),
 	}, {
 		name: "artifactType param with empty value",
-		pipelineResource: &PipelineResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "gcs-resource-with-empty-location-param",
-			},
-			Spec: PipelineResourceSpec{
-				Type: PipelineResourceTypeStorage,
-				Params: []Param{{
-					Name:  "Location",
-					Value: "gs://test",
-				}, {
-					Name:  "type",
-					Value: "build-gcs",
-				}, {
-					Name:  "ArtifactType",
-					Value: "",
-				}},
-			},
-		},
+		pipelineResource: tb.PipelineResource("buildgcs-resource-with-empty-artifactType-param", "default", tb.PipelineResourceSpec(
+			v1alpha1.PipelineResourceTypeStorage,
+			tb.PipelineResourceSpecParam("Location", "gs://test"),
+			tb.PipelineResourceSpecParam("type", "build-gcs"),
+			tb.PipelineResourceSpecParam("ArtifactType", ""),
+		)),
 	}, {
 		name: "artifactType param with invalid value",
-		pipelineResource: &PipelineResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "gcs-resource-with-empty-location-param",
-			},
-			Spec: PipelineResourceSpec{
-				Type: PipelineResourceTypeStorage,
-				Params: []Param{{
-					Name:  "Location",
-					Value: "gs://test",
-				}, {
-					Name:  "type",
-					Value: "build-gcs",
-				}, {
-					Name:  "ArtifactType",
-					Value: "invalid-type",
-				}},
-			},
-		},
+		pipelineResource: tb.PipelineResource("buildgcs-resource-with-invalid-artifactType-param", "default", tb.PipelineResourceSpec(
+			v1alpha1.PipelineResourceTypeStorage,
+			tb.PipelineResourceSpecParam("Location", "gs://test"),
+			tb.PipelineResourceSpecParam("type", "build-gcs"),
+			tb.PipelineResourceSpecParam("ArtifactType", "invalid-type"),
+		)),
 	}, {
 		name: "artifactType param with secrets value",
-		pipelineResource: &PipelineResource{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "gcs-resource-with-secrets",
-			},
-			Spec: PipelineResourceSpec{
-				Type: PipelineResourceTypeStorage,
-				Params: []Param{{
-					Name:  "Location",
-					Value: "gs://test",
-				}, {
-					Name:  "type",
-					Value: "build-gcs",
-				}, {
-					Name:  "ArtifactType",
-					Value: "invalid-type",
-				}},
-				SecretParams: []SecretParam{{
-					SecretKey:  "secretKey",
-					SecretName: "secretName",
-					FieldName:  "GOOGLE_APPLICATION_CREDENTIALS",
-				}},
-			},
-		},
+		pipelineResource: tb.PipelineResource("buildgcs-resource-with-invalid-artifactType-param-and-secrets", "default", tb.PipelineResourceSpec(
+			v1alpha1.PipelineResourceTypeStorage,
+			tb.PipelineResourceSpecParam("Location", "gs://test"),
+			tb.PipelineResourceSpecParam("type", "build-gcs"),
+			tb.PipelineResourceSpecParam("ArtifactType", "invalid-type"),
+			tb.PipelineResourceSpecSecretParam("secretKey", "secretName", "GOOGLE_APPLICATION_CREDENTIALS"),
+		)),
 	}}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewStorageResource(tc.pipelineResource)
+			_, err := v1alpha1.NewStorageResource(tc.pipelineResource)
 			if err == nil {
 				t.Error("Expected error creating BuildGCS resource")
 			}
@@ -157,32 +89,20 @@ func Test_Invalid_BuildGCSResource(t *testing.T) {
 }
 
 func Test_Valid_NewBuildGCSResource(t *testing.T) {
-	pr := &PipelineResource{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "build-gcs-resource",
-		},
-		Spec: PipelineResourceSpec{
-			Type: PipelineResourceTypeStorage,
-			Params: []Param{{
-				Name:  "Location",
-				Value: "gs://fake-bucket",
-			}, {
-				Name:  "type",
-				Value: "build-gcs",
-			}, {
-				Name:  "ArtifactType",
-				Value: "Manifest",
-			}},
-		},
-	}
-	expectedGCSResource := &BuildGCSResource{
+	pr := tb.PipelineResource("build-gcs-resource", "default", tb.PipelineResourceSpec(
+		v1alpha1.PipelineResourceTypeStorage,
+		tb.PipelineResourceSpecParam("Location", "gs://fake-bucket"),
+		tb.PipelineResourceSpecParam("type", "build-gcs"),
+		tb.PipelineResourceSpecParam("ArtifactType", "Manifest"),
+	))
+	expectedGCSResource := &v1alpha1.BuildGCSResource{
 		Name:         "build-gcs-resource",
 		Location:     "gs://fake-bucket",
-		Type:         PipelineResourceTypeStorage,
+		Type:         v1alpha1.PipelineResourceTypeStorage,
 		ArtifactType: "Manifest",
 	}
 
-	r, err := NewBuildGCSResource(pr)
+	r, err := v1alpha1.NewBuildGCSResource(pr)
 	if err != nil {
 		t.Fatalf("Unexpected error creating BuildGCS resource: %s", err)
 	}
@@ -192,15 +112,16 @@ func Test_Valid_NewBuildGCSResource(t *testing.T) {
 }
 
 func Test_BuildGCSGetReplacements(t *testing.T) {
-	r := &BuildGCSResource{
+	r := &v1alpha1.BuildGCSResource{
 		Name:     "gcs-resource",
 		Location: "gs://fake-bucket",
-		Type:     PipelineResourceTypeBuildGCS,
+		Type:     v1alpha1.PipelineResourceTypeBuildGCS,
 	}
 	expectedReplacementMap := map[string]string{
 		"name":     "gcs-resource",
 		"type":     "build-gcs",
 		"location": "gs://fake-bucket",
+		"path":     "",
 	}
 	if d := cmp.Diff(r.Replacements(), expectedReplacementMap); d != "" {
 		t.Errorf("BuildGCS Replacement map mismatch: %s", d)
@@ -210,12 +131,12 @@ func Test_BuildGCSGetReplacements(t *testing.T) {
 func Test_BuildGCSGetDownloadContainerSpec(t *testing.T) {
 	testcases := []struct {
 		name           string
-		resource       *BuildGCSResource
+		resource       *v1alpha1.BuildGCSResource
 		wantContainers []corev1.Container
 		wantErr        bool
 	}{{
 		name: "valid download protected buckets",
-		resource: &BuildGCSResource{
+		resource: &v1alpha1.BuildGCSResource{
 			Name:           "gcs-valid",
 			Location:       "gs://some-bucket",
 			DestinationDir: "/workspace",
@@ -234,7 +155,7 @@ func Test_BuildGCSGetDownloadContainerSpec(t *testing.T) {
 		}},
 	}, {
 		name: "invalid no destination directory set",
-		resource: &BuildGCSResource{
+		resource: &v1alpha1.BuildGCSResource{
 			Name:         "gcs-invalid",
 			Location:     "gs://some-bucket",
 			ArtifactType: "Archive",
@@ -258,12 +179,12 @@ func Test_BuildGCSGetDownloadContainerSpec(t *testing.T) {
 func Test_BuildGCSGetUploadContainerSpec(t *testing.T) {
 	testcases := []struct {
 		name           string
-		resource       *BuildGCSResource
+		resource       *v1alpha1.BuildGCSResource
 		wantContainers []corev1.Container
 		wantErr        bool
 	}{{
 		name: "valid upload to protected buckets with directory paths",
-		resource: &BuildGCSResource{
+		resource: &v1alpha1.BuildGCSResource{
 			Name:           "gcs-valid",
 			Location:       "gs://some-bucket/manifest.json",
 			DestinationDir: "/workspace",
@@ -276,7 +197,7 @@ func Test_BuildGCSGetUploadContainerSpec(t *testing.T) {
 		}},
 	}, {
 		name: "invalid upload to protected buckets with single file",
-		resource: &BuildGCSResource{
+		resource: &v1alpha1.BuildGCSResource{
 			Name:           "gcs-valid",
 			ArtifactType:   "Archive",
 			Location:       "gs://some-bucket",
@@ -285,7 +206,7 @@ func Test_BuildGCSGetUploadContainerSpec(t *testing.T) {
 		wantErr: true,
 	}, {
 		name: "invalid upload with no source directory path",
-		resource: &BuildGCSResource{
+		resource: &v1alpha1.BuildGCSResource{
 			Name:     "gcs-invalid",
 			Location: "gs://some-bucket/manifest.json",
 		},

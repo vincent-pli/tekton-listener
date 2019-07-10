@@ -16,24 +16,21 @@ limitations under the License.
 
 package names
 
-import (
-	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
-)
+import "github.com/knative/pkg/kmeta"
 
-func Deployment(rev *v1alpha1.Revision) string {
-	return rev.Name + "-deployment"
+// Deployment returns the precomputed name for the revision deployment
+func Deployment(rev kmeta.Accessor) string {
+	return kmeta.ChildName(rev.GetName(), "-deployment")
 }
 
-func ImageCache(rev *v1alpha1.Revision) string {
-	return rev.Name + "-cache"
+// ImageCache returns the precomputed name for the image cache.
+func ImageCache(rev kmeta.Accessor) string {
+	return kmeta.ChildName(rev.GetName(), "-cache")
 }
 
-func KPA(rev *v1alpha1.Revision) string {
+// KPA returns the PA name for the revision.
+func KPA(rev kmeta.Accessor) string {
 	// We want the KPA's "key" to match the revision,
 	// to simplify the transition to the KPA.
-	return rev.Name
-}
-
-func FluentdConfigMap(rev *v1alpha1.Revision) string {
-	return rev.Name + "-fluentd"
+	return rev.GetName()
 }

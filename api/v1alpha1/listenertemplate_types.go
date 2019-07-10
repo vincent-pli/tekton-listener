@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	pipelinev1alpha1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"context"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -74,6 +75,9 @@ type ListenerTemplateList struct {
 func (lt *ListenerTemplate) HasReference() bool {
 	return lt.Status.AvailableReference != 0
 }
+
+// SetDefaults for pipelinerun
+func (lt *ListenerTemplate) SetDefaults(ctx context.Context) {}
 
 func init() {
 	SchemeBuilder.Register(&ListenerTemplate{}, &ListenerTemplateList{})

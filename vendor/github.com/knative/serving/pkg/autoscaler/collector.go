@@ -31,13 +31,12 @@ import (
 )
 
 const (
-	// scrapeTickInterval is the interval of time between scraping metrics across
-	// all pods of a revision.
-	// TODO(yanweiguo): tuning this value. To be based on pod population?
-	scrapeTickInterval = time.Second / 3
+	// scrapeTickInterval is the interval of time between triggring StatsScraper.Scrape()
+	// to get metrics across all pods of a revision.
+	scrapeTickInterval = time.Second
 
-	// bucketSize is the size of the buckets of stats we create.
-	bucketSize = 2 * time.Second
+	// BucketSize is the size of the buckets of stats we create.
+	BucketSize = 2 * time.Second
 )
 
 var (
@@ -57,6 +56,10 @@ type Metric struct {
 type MetricSpec struct {
 	StableWindow time.Duration
 	PanicWindow  time.Duration
+
+	// ScrapeTarget is the K8s service that is publishes the metric
+	// endpoint.
+	ScrapeTarget string
 }
 
 // MetricStatus reflects the status of metric collection for this specific entity.
@@ -81,10 +84,10 @@ type Stat struct {
 	AverageProxiedConcurrentRequests float64
 
 	// Number of requests received since last Stat (approximately QPS).
-	RequestCount int32
+	RequestCount float64
 
 	// Part of RequestCount, for requests going through a proxy.
-	ProxiedRequestCount int32
+	ProxiedRequestCount float64
 }
 
 // StatMessage wraps a Stat with identifying information so it can be routed
@@ -168,6 +171,11 @@ func (c *MetricCollector) Update(ctx context.Context, metric *Metric) (*Metric, 
 
 	key := NewMetricKey(metric.Namespace, metric.Name)
 	if collection, exists := c.collections[key]; exists {
+		scraper, err := c.statsScraperFactory(metric)
+		if err != nil {
+			return nil, err
+		}
+		collection.updateScraper(scraper)
 		collection.updateMetric(metric)
 		return metric.DeepCopy(), nil
 	}
@@ -214,17 +222,32 @@ type collection struct {
 	metricMutex sync.RWMutex
 	metric      *Metric
 
-	buckets *aggregation.TimedFloat64Buckets
+	scraperMutex sync.RWMutex
+	scraper      StatsScraper
+	buckets      *aggregation.TimedFloat64Buckets
 
 	grp    sync.WaitGroup
 	stopCh chan struct{}
+}
+
+func (c *collection) updateScraper(ss StatsScraper) {
+	c.scraperMutex.Lock()
+	defer c.scraperMutex.Unlock()
+	c.scraper = ss
+}
+
+func (c *collection) getScraper() StatsScraper {
+	c.scraperMutex.RLock()
+	defer c.scraperMutex.RUnlock()
+	return c.scraper
 }
 
 // newCollection creates a new collection.
 func newCollection(metric *Metric, scraper StatsScraper, logger *zap.SugaredLogger) *collection {
 	c := &collection{
 		metric:  metric,
-		buckets: aggregation.NewTimedFloat64Buckets(bucketSize),
+		buckets: aggregation.NewTimedFloat64Buckets(BucketSize),
+		scraper: scraper,
 
 		stopCh: make(chan struct{}),
 	}
@@ -240,7 +263,7 @@ func newCollection(metric *Metric, scraper StatsScraper, logger *zap.SugaredLogg
 				scrapeTicker.Stop()
 				return
 			case <-scrapeTicker.C:
-				message, err := scraper.Scrape()
+				message, err := c.getScraper().Scrape()
 				if err != nil {
 					logger.Errorw("Failed to scrape metrics", zap.Error(err))
 				}

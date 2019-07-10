@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors.
+Copyright 2019 The Tekton Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha1_test
 
 import (
 	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/test/names"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -32,9 +33,9 @@ const (
 var (
 	expectedVolumeName = fmt.Sprintf("volume-bucket-%s", secretName)
 
-	bucket = ArtifactBucket{
+	bucket = v1alpha1.ArtifactBucket{
 		Location: "gs://fake-bucket",
-		Secrets: []SecretParam{{
+		Secrets: []v1alpha1.SecretParam{{
 			FieldName:  "GOOGLE_APPLICATION_CREDENTIALS",
 			SecretName: secretName,
 			SecretKey:  "serviceaccount",
@@ -54,7 +55,7 @@ func TestBucketGetCopyFromContainerSpec(t *testing.T) {
 		Name:         "artifact-copy-from-workspace-mz4c7",
 		Image:        "override-with-gsutil-image:latest",
 		Command:      []string{"/ko-app/gsutil"},
-		Args:         []string{"-args", "cp -r gs://fake-bucket/src-path/* /workspace/destination"},
+		Args:         []string{"-args", "cp -P -r gs://fake-bucket/src-path/* /workspace/destination"},
 		Env:          []corev1.EnvVar{{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: fmt.Sprintf("/var/bucketsecret/%s/serviceaccount", secretName)}},
 		VolumeMounts: []corev1.VolumeMount{{Name: expectedVolumeName, MountPath: fmt.Sprintf("/var/bucketsecret/%s", secretName)}},
 	}}
@@ -71,7 +72,7 @@ func TestBucketGetCopyToContainerSpec(t *testing.T) {
 		Name:         "artifact-copy-to-workspace-9l9zj",
 		Image:        "override-with-gsutil-image:latest",
 		Command:      []string{"/ko-app/gsutil"},
-		Args:         []string{"-args", "cp -r src-path gs://fake-bucket/workspace/destination"},
+		Args:         []string{"-args", "cp -P -r src-path gs://fake-bucket/workspace/destination"},
 		Env:          []corev1.EnvVar{{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: fmt.Sprintf("/var/bucketsecret/%s/serviceaccount", secretName)}},
 		VolumeMounts: []corev1.VolumeMount{{Name: expectedVolumeName, MountPath: fmt.Sprintf("/var/bucketsecret/%s", secretName)}},
 	}}

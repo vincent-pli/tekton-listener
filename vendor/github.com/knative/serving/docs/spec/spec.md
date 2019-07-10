@@ -148,13 +148,15 @@ spec:
       # is a singleton []corev1.Container; See the Container section below.
       containers: ...
 
-      # is a heavily restricted []core.v1.Volume; only the secret and configMap
-      # types are allowed.
+      # is a heavily restricted []core.v1.Volume; only the secret, configMap,
+      # and projected types are allowed.
       volumes:
       - name: foo
         secret: ...
       - name: bar
         configMap: ...
+      - name: baz
+        projected: ...
 
       # +optional max request concurrency per instance.
       # Defaults to `0` (system decides) when unspecified.
@@ -211,13 +213,15 @@ metadata:
 spec:
   containers: ... # See the Container section below
 
-  # is a heavily restricted []core.v1.Volume; only the secret and configMap
-  # types are allowed.
+  # is a heavily restricted []core.v1.Volume; only the secret, configMap
+  # and projected types are allowed.
   volumes:
   - name: foo
     secret: ...
   - name: bar
     configMap: ...
+  - name: baz
+    projected: ...
 
   # Name of the service account the code should run as.
   serviceAccountName: ...
@@ -377,6 +381,7 @@ otherwise noted.
 
 ```yaml
 container: # v1.Container
+  name: ... # Optional
   args: [...] # Optional
   command: [...] # Optional
   env: ... # Optional
@@ -406,8 +411,8 @@ container: # v1.Container
   # on through the $PORT environment variable that is always set within the container.
   # Some fields are not allowed, such as hostIP and hostPort.
   ports: # Optional
-    # Valid range is [1-65535], except 8012 and 8013 (RequestQueuePorts)
-    # and 8022 (RequestQueueAdminPort).
+    # Valid range is [1-65535], except 8012 and 8013 (queue proxy request ports)
+    # 8022 (queue proxy admin port), 9090 and 9091 (queue proxy metrics ports).
     - containerPort: ...
       name: ... # Optional, one of "http1", "h2c"
       protocol: ... # Optional, one of "", "tcp"

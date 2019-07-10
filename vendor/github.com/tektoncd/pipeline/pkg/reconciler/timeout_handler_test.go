@@ -1,17 +1,18 @@
 package reconciler
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/knative/pkg/apis"
+	"github.com/tektoncd/pipeline/pkg/apis/config"
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/test"
 	tb "github.com/tektoncd/pipeline/test/builder"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
+	"golang.org/x/xerrors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -35,6 +36,7 @@ func TestTaskRunCheckTimeouts(t *testing.T) {
 
 	taskRunRunning := tb.TaskRun("test-taskrun-running", testNs, tb.TaskRunSpec(
 		tb.TaskRunTaskRef(simpleTask.Name, tb.TaskRefAPIVersion("a1")),
+		tb.TaskRunTimeout(config.DefaultTimeoutMinutes*time.Minute),
 	), tb.TaskRunStatus(tb.Condition(apis.Condition{
 		Type:   apis.ConditionSucceeded,
 		Status: corev1.ConditionUnknown}),
@@ -43,6 +45,7 @@ func TestTaskRunCheckTimeouts(t *testing.T) {
 
 	taskRunDone := tb.TaskRun("test-taskrun-completed", testNs, tb.TaskRunSpec(
 		tb.TaskRunTaskRef(simpleTask.Name, tb.TaskRefAPIVersion("a1")),
+		tb.TaskRunTimeout(config.DefaultTimeoutMinutes*time.Minute),
 	), tb.TaskRunStatus(tb.Condition(apis.Condition{
 		Type:   apis.ConditionSucceeded,
 		Status: corev1.ConditionTrue}),
@@ -51,6 +54,7 @@ func TestTaskRunCheckTimeouts(t *testing.T) {
 	taskRunCancelled := tb.TaskRun("test-taskrun-run-cancelled", testNs, tb.TaskRunSpec(
 		tb.TaskRunTaskRef(simpleTask.Name),
 		tb.TaskRunCancelled,
+		tb.TaskRunTimeout(1*time.Second),
 	), tb.TaskRunStatus(tb.Condition(apis.Condition{
 		Type:   apis.ConditionSucceeded,
 		Status: corev1.ConditionUnknown}),
@@ -69,7 +73,8 @@ func TestTaskRunCheckTimeouts(t *testing.T) {
 	defer close(stopCh)
 	c, _ := test.SeedTestData(t, d)
 	observer, _ := observer.New(zap.InfoLevel)
-	th := NewTimeoutHandler(c.Kube, c.Pipeline, stopCh, zap.New(observer).Sugar())
+
+	th := NewTimeoutHandler(stopCh, zap.New(observer).Sugar())
 	gotCallback := sync.Map{}
 	f := func(tr interface{}) {
 		trNew := tr.(*v1alpha1.TaskRun)
@@ -77,7 +82,7 @@ func TestTaskRunCheckTimeouts(t *testing.T) {
 	}
 
 	th.SetTaskRunCallbackFunc(f)
-	th.CheckTimeouts()
+	th.CheckTimeouts(c.Kube, c.Pipeline)
 
 	for _, tc := range []struct {
 		name           string
@@ -110,7 +115,7 @@ func TestTaskRunCheckTimeouts(t *testing.T) {
 				}
 				// not expecting callback
 				if _, ok := gotCallback.Load(tc.taskRun.Name); ok {
-					return false, fmt.Errorf("did not expect call back for %s why", tc.taskRun.Name)
+					return false, xerrors.Errorf("did not expect call back for %s why", tc.taskRun.Name)
 				}
 				return true, nil
 			}); err != nil {
@@ -128,7 +133,7 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 	prTimeout := tb.PipelineRun("test-pipeline-run-with-timeout", testNs,
 		tb.PipelineRunSpec("test-pipeline",
 			tb.PipelineRunServiceAccount("test-sa"),
-			tb.PipelineRunTimeout(&metav1.Duration{Duration: 1 * time.Second}),
+			tb.PipelineRunTimeout(1*time.Second),
 		),
 		tb.PipelineRunStatus(
 			tb.PipelineRunStartTime(time.Now().AddDate(0, 0, -1))),
@@ -136,7 +141,9 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 	ts := tb.Task("hello-world", testNs)
 
 	prRunning := tb.PipelineRun("test-pipeline-running", testNs,
-		tb.PipelineRunSpec("test-pipeline"),
+		tb.PipelineRunSpec("test-pipeline",
+			tb.PipelineRunTimeout(config.DefaultTimeoutMinutes*time.Minute),
+		),
 		tb.PipelineRunStatus(tb.PipelineRunStatusCondition(apis.Condition{
 			Type:   apis.ConditionSucceeded,
 			Status: corev1.ConditionUnknown}),
@@ -144,7 +151,9 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 		),
 	)
 	prDone := tb.PipelineRun("test-pipeline-done", testNs,
-		tb.PipelineRunSpec("test-pipeline"),
+		tb.PipelineRunSpec("test-pipeline",
+			tb.PipelineRunTimeout(config.DefaultTimeoutMinutes*time.Minute),
+		),
 		tb.PipelineRunStatus(tb.PipelineRunStatusCondition(apis.Condition{
 			Type:   apis.ConditionSucceeded,
 			Status: corev1.ConditionTrue}),
@@ -153,6 +162,7 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 	prCancelled := tb.PipelineRun("test-pipeline-cancel", testNs,
 		tb.PipelineRunSpec("test-pipeline", tb.PipelineRunServiceAccount("test-sa"),
 			tb.PipelineRunCancelled,
+			tb.PipelineRunTimeout(config.DefaultTimeoutMinutes*time.Minute),
 		),
 		tb.PipelineRunStatus(tb.PipelineRunStatusCondition(apis.Condition{
 			Type:   apis.ConditionSucceeded,
@@ -172,7 +182,7 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 	c, _ := test.SeedTestData(t, d)
 	stopCh := make(chan struct{})
 	observer, _ := observer.New(zap.InfoLevel)
-	th := NewTimeoutHandler(c.Kube, c.Pipeline, stopCh, zap.New(observer).Sugar())
+	th := NewTimeoutHandler(stopCh, zap.New(observer).Sugar())
 	defer close(stopCh)
 
 	gotCallback := sync.Map{}
@@ -182,7 +192,7 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 	}
 
 	th.SetPipelineRunCallbackFunc(f)
-	th.CheckTimeouts()
+	th.CheckTimeouts(c.Kube, c.Pipeline)
 	for _, tc := range []struct {
 		name           string
 		pr             *v1alpha1.PipelineRun
@@ -214,7 +224,7 @@ func TestPipelinRunCheckTimeouts(t *testing.T) {
 				}
 				// not expecting callback
 				if _, ok := gotCallback.Load(tc.pr.Name); ok {
-					return false, fmt.Errorf("did not expect call back for %s why", tc.pr.Name)
+					return false, xerrors.Errorf("did not expect call back for %s why", tc.pr.Name)
 				}
 				return true, nil
 			}); err != nil {
@@ -247,7 +257,7 @@ func TestWithNoFunc(t *testing.T) {
 	stopCh := make(chan struct{})
 	c, _ := test.SeedTestData(t, d)
 	observer, _ := observer.New(zap.InfoLevel)
-	testHandler := NewTimeoutHandler(c.Kube, c.Pipeline, stopCh, zap.New(observer).Sugar())
+	testHandler := NewTimeoutHandler(stopCh, zap.New(observer).Sugar())
 	defer func() {
 		// this delay will ensure there is no race condition between stopCh/ timeout channel getting triggered
 		time.Sleep(10 * time.Millisecond)
@@ -256,6 +266,69 @@ func TestWithNoFunc(t *testing.T) {
 			t.Fatal("Expected CheckTimeouts function not to panic")
 		}
 	}()
-	testHandler.CheckTimeouts()
+	testHandler.CheckTimeouts(c.Kube, c.Pipeline)
 
+}
+
+// TestSetTaskRunTimer checks that the SetTaskRunTimer method correctly calls the TaskRun
+// callback after a set amount of time.
+func TestSetTaskRunTimer(t *testing.T) {
+	taskRun := tb.TaskRun("test-taskrun-arbitrary-timer", testNs, tb.TaskRunSpec(
+		tb.TaskRunTaskRef(simpleTask.Name, tb.TaskRefAPIVersion("a1")),
+		tb.TaskRunTimeout(2*time.Second),
+	), tb.TaskRunStatus(tb.Condition(apis.Condition{
+		Type:   apis.ConditionSucceeded,
+		Status: corev1.ConditionUnknown}),
+		tb.TaskRunStartTime(time.Now().Add(-10*time.Second)),
+	))
+
+	stopCh := make(chan struct{})
+	observer, _ := observer.New(zap.InfoLevel)
+	testHandler := NewTimeoutHandler(stopCh, zap.New(observer).Sugar())
+	timerDuration := 50 * time.Millisecond
+	timerFailDeadline := 100 * time.Millisecond
+	doneCh := make(chan struct{})
+	callback := func(_ interface{}) {
+		close(doneCh)
+	}
+	testHandler.SetTaskRunCallbackFunc(callback)
+	go testHandler.SetTaskRunTimer(taskRun, timerDuration)
+	select {
+	case <-doneCh:
+		// The task run timer executed before the failure deadline
+	case <-time.After(timerFailDeadline):
+		t.Errorf("timer did not execute task run callback func within expected time")
+	}
+}
+
+// TestBackoffDuration asserts that the backoffDuration func returns Durations
+// within the timeout handler's bounds.
+func TestBackoffDuration(t *testing.T) {
+	testcases := []struct {
+		description      string
+		inputCount       uint
+		jitterFunc       func(int) int
+		expectedDuration time.Duration
+	}{
+		{
+			description:      "an input count that is too large is rounded to the maximum allowed exponent",
+			inputCount:       uint(maxBackoffExponent + 1),
+			jitterFunc:       func(in int) int { return in },
+			expectedDuration: maxBackoffSeconds * time.Second,
+		},
+		{
+			description:      "a jittered number of seconds that is above the maximum allowed is constrained",
+			inputCount:       1,
+			jitterFunc:       func(in int) int { return maxBackoffSeconds + 1 },
+			expectedDuration: maxBackoffSeconds * time.Second,
+		},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.description, func(t *testing.T) {
+			result := backoffDuration(tc.inputCount, tc.jitterFunc)
+			if result != tc.expectedDuration {
+				t.Errorf("expected %q received %q", tc.expectedDuration.String(), result.String())
+			}
+		})
+	}
 }

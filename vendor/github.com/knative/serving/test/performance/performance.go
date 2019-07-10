@@ -18,7 +18,6 @@ package performance
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"path"
 	"testing"
@@ -28,8 +27,7 @@ import (
 	"github.com/knative/pkg/test/logging"
 	"github.com/knative/pkg/test/zipkin"
 	"github.com/knative/serving/test"
-	"github.com/knative/test-infra/shared/junit"
-	"github.com/knative/test-infra/shared/loadgenerator"
+	"github.com/knative/test-infra/shared/common"
 	"github.com/knative/test-infra/shared/prometheus"
 	"github.com/knative/test-infra/shared/prow"
 
@@ -38,9 +36,7 @@ import (
 )
 
 const (
-	istioNS      = "istio-system"
 	monitoringNS = "knative-monitoring"
-	gateway      = "istio-ingressgateway"
 	// Property name used by testgrid.
 	perfLatency = "perf_latency"
 	duration    = 1 * time.Minute
@@ -82,7 +78,7 @@ func Setup(t *testing.T, monitoring ...int) (*Client, error) {
 
 			// Create file to store traces
 			dir := prow.GetLocalArtifactsDir()
-			if err := createDir(dir); nil != err {
+			if err := common.CreateDir(dir); nil != err {
 				t.Log("Cannot create the artifacts dir. Will not log tracing.")
 			} else {
 				name := path.Join(dir, t.Name()+traceSuffix)
@@ -116,30 +112,6 @@ func TearDown(client *Client, names test.ResourceNames, logf logging.FormatLogge
 	}
 }
 
-// CreatePerfTestCase creates a perf test case with the provided name and value
-func CreatePerfTestCase(metricValue float32, metricName, testName string) junit.TestCase {
-	tp := []junit.TestProperty{{Name: perfLatency, Value: fmt.Sprintf("%f", metricValue)}}
-	tc := junit.TestCase{
-		ClassName:  testName,
-		Name:       fmt.Sprintf("%s/%s", testName, metricName),
-		Properties: junit.TestProperties{Properties: tp}}
-	return tc
-}
-
-// ErrorsPercentage returns the error percentage based on response codes.
-// Any non 200 response will provide a value > 0.0
-func ErrorsPercentage(resp *loadgenerator.GeneratorResults) float64 {
-	var successes, errors int64
-	for retCode, count := range resp.Result[0].RetCodes {
-		if retCode == http.StatusOK {
-			successes = successes + count
-		} else {
-			errors = errors + count
-		}
-	}
-	return float64(errors*100) / float64(errors+successes)
-}
-
 // AddTrace gets the JSON zipkin trace for the traceId and stores it.
 // https://github.com/openzipkin/zipkin-go/blob/master/model/span.go defines the struct for the JSON
 func AddTrace(logf logging.FormatLogger, tName string, traceID string) {
@@ -160,14 +132,4 @@ func AddTrace(logf logging.FormatLogger, tName string, traceID string) {
 	if _, err := traceFile.WriteString(fmt.Sprintf("%s,\n", trace)); err != nil {
 		logf("Cannot write to trace file: %v", err)
 	}
-}
-
-// createDir creates dir if does not exist.
-func createDir(dirPath string) error {
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		if err = os.MkdirAll(dirPath, 0777); err != nil {
-			return fmt.Errorf("Failed to create directory: %v", err)
-		}
-	}
-	return nil
 }

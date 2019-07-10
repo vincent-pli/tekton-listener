@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -89,10 +89,13 @@ func TestAddOutputImageDigestExporter(t *testing.T) {
 				Name: "step1",
 			},
 			{
-				Name:    "image-digest-exporter-step1-9l9zj",
-				Image:   "override-with-imagedigest-exporter-image:latest",
-				Command: []string{"/ko-app/imagedigestexporter"},
-				Args:    []string{"-images", fmt.Sprintf("[{\"name\":\"source-image-1\",\"type\":\"image\",\"url\":\"gcr.io/some-image-1\",\"digest\":\"\",\"OutputImageDir\":\"%s\"}]", currentDir)},
+				Name:                     "image-digest-exporter-step1-9l9zj",
+				Image:                    "override-with-imagedigest-exporter-image:latest",
+				Command:                  []string{"/ko-app/imagedigestexporter"},
+				Args:                     []string{"-images", fmt.Sprintf("[{\"name\":\"source-image-1\",\"type\":\"image\",\"url\":\"gcr.io/some-image-1\",\"digest\":\"\",\"OutputImageDir\":\"%s\"}]", currentDir),
+												   "-terminationMessagePath", "/builder/home/image-outputs/termination-log"},
+				TerminationMessagePath:   TerminationMessagePath,
+				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}},
 	}, {
 		desc: "image resource in task with multiple steps",
@@ -151,17 +154,23 @@ func TestAddOutputImageDigestExporter(t *testing.T) {
 				Name: "step1",
 			},
 			{
-				Name:    "image-digest-exporter-step1-9l9zj",
-				Image:   "override-with-imagedigest-exporter-image:latest",
-				Command: []string{"/ko-app/imagedigestexporter"},
-				Args:    []string{"-images", fmt.Sprintf("[{\"name\":\"source-image-1\",\"type\":\"image\",\"url\":\"gcr.io/some-image-1\",\"digest\":\"\",\"OutputImageDir\":\"%s\"}]", currentDir)},
+				Name:                     "image-digest-exporter-step1-9l9zj",
+				Image:                    "override-with-imagedigest-exporter-image:latest",
+				Command:                  []string{"/ko-app/imagedigestexporter"},
+				Args:                     []string{"-images", fmt.Sprintf("[{\"name\":\"source-image-1\",\"type\":\"image\",\"url\":\"gcr.io/some-image-1\",\"digest\":\"\",\"OutputImageDir\":\"%s\"}]", currentDir),
+													"-terminationMessagePath", "/builder/home/image-outputs/termination-log"},
+				TerminationMessagePath:   TerminationMessagePath,
+				TerminationMessagePolicy: "FallbackToLogsOnError",
 			}, {
 				Name: "step2",
 			}, {
-				Name:    "image-digest-exporter-step2-mz4c7",
-				Image:   "override-with-imagedigest-exporter-image:latest",
-				Command: []string{"/ko-app/imagedigestexporter"},
-				Args:    []string{"-images", fmt.Sprintf("[{\"name\":\"source-image-1\",\"type\":\"image\",\"url\":\"gcr.io/some-image-1\",\"digest\":\"\",\"OutputImageDir\":\"%s\"}]", currentDir)},
+				Name:                     "image-digest-exporter-step2-mz4c7",
+				Image:                    "override-with-imagedigest-exporter-image:latest",
+				Command:                  []string{"/ko-app/imagedigestexporter"},
+				Args:                     []string{"-images", fmt.Sprintf("[{\"name\":\"source-image-1\",\"type\":\"image\",\"url\":\"gcr.io/some-image-1\",\"digest\":\"\",\"OutputImageDir\":\"%s\"}]", currentDir),
+													"-terminationMessagePath", "/builder/home/image-outputs/termination-log"},
+				TerminationMessagePath:   TerminationMessagePath,
+				TerminationMessagePolicy: "FallbackToLogsOnError",
 			},
 		},
 	}} {

@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knative/serving/pkg/apis/serving/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -38,8 +37,8 @@ type Config struct {
 	EnableScaleToZero bool
 
 	// Target concurrency knobs for different container concurrency configurations.
-	ContainerConcurrencyTargetPercentage float64
-	ContainerConcurrencyTargetDefault    float64
+	ContainerConcurrencyTargetFraction float64
+	ContainerConcurrencyTargetDefault  float64
 
 	// General autoscaler algorithm configuration.
 	MaxScaleUpRate           float64
@@ -53,20 +52,11 @@ type Config struct {
 	ScaleToZeroGracePeriod time.Duration
 }
 
-// TargetConcurrency calculates the target concurrency for a given container-concurrency
-// taking the container-concurrency-target-percentage into account.
-func (c *Config) TargetConcurrency(concurrency v1beta1.RevisionContainerConcurrencyType) float64 {
-	if concurrency == 0 {
-		return c.ContainerConcurrencyTargetDefault
-	}
-	return float64(concurrency) * c.ContainerConcurrencyTargetPercentage
-}
-
 // NewConfigFromMap creates a Config from the supplied map
 func NewConfigFromMap(data map[string]string) (*Config, error) {
 	lc := &Config{}
 
-	// Process bool fields
+	// Process bool fields.
 	for _, b := range []struct {
 		key          string
 		field        *bool
@@ -95,8 +85,8 @@ func NewConfigFromMap(data map[string]string) (*Config, error) {
 		defaultValue: 10.0,
 	}, {
 		key:   "container-concurrency-target-percentage",
-		field: &lc.ContainerConcurrencyTargetPercentage,
-		// TODO(#1956): tune target usage based on empirical data.
+		field: &lc.ContainerConcurrencyTargetFraction,
+		// TODO(#1956): Tune target usage based on empirical data.
 		// TODO(#2016): Revert to 0.7 once incorrect reporting is solved
 		defaultValue: 1.0,
 	}, {
@@ -119,6 +109,14 @@ func NewConfigFromMap(data map[string]string) (*Config, error) {
 		} else {
 			*f64.field = val
 		}
+	}
+
+	// Adjust % ⇒ fractions: for legacy reasons we allow values
+	// (0, 1] interval, so minimal percentage must be greater than 1.0.
+	// Internally we want to have fractions, since otherwise we'll have
+	// to perform division on each computation.
+	if lc.ContainerConcurrencyTargetFraction > 1.0 {
+		lc.ContainerConcurrencyTargetFraction /= 100.0
 	}
 
 	// Process Duration fields
@@ -152,8 +150,34 @@ func NewConfigFromMap(data map[string]string) (*Config, error) {
 		}
 	}
 
+	return validate(lc)
+}
+
+func validate(lc *Config) (*Config, error) {
 	if lc.ScaleToZeroGracePeriod < 30*time.Second {
 		return nil, fmt.Errorf("scale-to-zero-grace-period must be at least 30s, got %v", lc.ScaleToZeroGracePeriod)
+	}
+
+	if lc.ContainerConcurrencyTargetFraction <= 0 || lc.ContainerConcurrencyTargetFraction > 1 {
+		return nil, fmt.Errorf("container-concurrency-target-percentage = %f is outside of valid range of (0, 100]", lc.ContainerConcurrencyTargetFraction)
+	}
+
+	if x := lc.ContainerConcurrencyTargetFraction * lc.ContainerConcurrencyTargetDefault; x < 1.0 {
+		return nil, fmt.Errorf("container-concurrency-target-percentage and container-concurrency-target-default yield target concurrency of %f, can't be less than 1", x)
+	}
+
+	// We can't permit stable window be less than our aggregation window for correctness.
+	if lc.StableWindow < BucketSize {
+		return nil, fmt.Errorf("stable-window = %v, must be at least %v", lc.StableWindow, BucketSize)
+	}
+
+	if lc.PanicWindow < BucketSize || lc.PanicWindow > lc.StableWindow {
+		return nil, fmt.Errorf("panic-window = %v, must be in [%v, %v] interval", lc.PanicWindow, BucketSize, lc.StableWindow)
+	}
+
+	effPW := time.Duration(lc.PanicWindowPercentage / 100 * float64(lc.StableWindow))
+	if effPW < BucketSize || effPW > lc.StableWindow {
+		return nil, fmt.Errorf("panic-window = %v, must be in [%v, %v] interval", lc.PanicWindow, BucketSize, lc.StableWindow)
 	}
 
 	return lc, nil

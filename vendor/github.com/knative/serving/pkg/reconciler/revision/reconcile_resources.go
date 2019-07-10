@@ -19,27 +19,19 @@ package revision
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/knative/pkg/kmp"
 	"github.com/knative/pkg/logging"
 	"github.com/knative/pkg/logging/logkey"
 	kpav1alpha1 "github.com/knative/serving/pkg/apis/autoscaling/v1alpha1"
 	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
-	"github.com/knative/serving/pkg/reconciler/revision/config"
 	"github.com/knative/serving/pkg/reconciler/revision/resources"
 	resourcenames "github.com/knative/serving/pkg/reconciler/revision/resources/names"
-
+	"go.uber.org/zap"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-const (
-	serviceTimeoutDuration = 5 * time.Minute
 )
 
 func (c *Reconciler) reconcileDeployment(ctx context.Context, rev *v1alpha1.Revision) error {
@@ -63,7 +55,7 @@ func (c *Reconciler) reconcileDeployment(ctx context.Context, rev *v1alpha1.Revi
 	} else if !metav1.IsControlledBy(deployment, rev) {
 		// Surface an error in the revision's status, and return an error.
 		rev.Status.MarkResourceNotOwned("Deployment", deploymentName)
-		return fmt.Errorf("Revision: %q does not own Deployment: %q", rev.Name, deploymentName)
+		return fmt.Errorf("revision: %q does not own Deployment: %q", rev.Name, deploymentName)
 	} else {
 		// The deployment exists, but make sure that it has the shape that we expect.
 		deployment, err = c.checkAndUpdateDeployment(ctx, rev, deployment)
@@ -82,11 +74,23 @@ func (c *Reconciler) reconcileDeployment(ctx context.Context, rev *v1alpha1.Revi
 			// Arbitrarily grab the very first pod, as they all should be crashing
 			pod := pods.Items[0]
 
+			// Update the revision status if pod cannot be scheduled(possibly resource constraints)
+			// If pod cannot be scheduled then we expect the container status to be empty.
+			for _, cond := range pod.Status.Conditions {
+				if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse {
+					rev.Status.MarkResourcesUnavailable(cond.Reason, cond.Message)
+					break
+				}
+			}
+
 			for _, status := range pod.Status.ContainerStatuses {
-				if status.Name == resources.UserContainerName {
+				if status.Name == rev.Spec.GetContainer().Name {
 					if t := status.LastTerminationState.Terminated; t != nil {
 						logger.Infof("%s marking exiting with: %d/%s", rev.Name, t.ExitCode, t.Message)
 						rev.Status.MarkContainerExiting(t.ExitCode, t.Message)
+					} else if w := status.State.Waiting; w != nil && hasDeploymentTimedOut(deployment) {
+						logger.Infof("%s marking resources unavailable with: %s: %s", rev.Name, w.Reason, w.Message)
+						rev.Status.MarkResourcesUnavailable(w.Reason, w.Message)
 					}
 					break
 				}
@@ -148,7 +152,7 @@ func (c *Reconciler) reconcileKPA(ctx context.Context, rev *v1alpha1.Revision) e
 	} else if !metav1.IsControlledBy(kpa, rev) {
 		// Surface an error in the revision's status, and return an error.
 		rev.Status.MarkResourceNotOwned("PodAutoscaler", kpaName)
-		return fmt.Errorf("Revision: %q does not own PodAutoscaler: %q", rev.Name, kpaName)
+		return fmt.Errorf("revision: %q does not own PodAutoscaler: %q", rev.Name, kpaName)
 	}
 
 	// Perhaps tha KPA spec changed underneath ourselves?
@@ -192,48 +196,18 @@ func (c *Reconciler) reconcileKPA(ctx context.Context, rev *v1alpha1.Revision) e
 	return nil
 }
 
-func (c *Reconciler) reconcileFluentdConfigMap(ctx context.Context, rev *v1alpha1.Revision) error {
-	logger := logging.FromContext(ctx)
-	cfgs := config.FromContext(ctx)
-
-	if !cfgs.Observability.EnableVarLogCollection {
-		return nil
-	}
-
-	ns := rev.Namespace
-	name := resourcenames.FluentdConfigMap(rev)
-
-	configMap, err := c.configMapLister.ConfigMaps(ns).Get(name)
-	if apierrs.IsNotFound(err) {
-		// ConfigMap doesn't exist, going to create it
-		desiredConfigMap := resources.MakeFluentdConfigMap(rev, cfgs.Observability)
-		_, err = c.KubeClientSet.CoreV1().ConfigMaps(ns).Create(desiredConfigMap)
-		if err != nil {
-			logger.Errorw("Error creating fluentd configmap", zap.Error(err))
-			return err
+func hasDeploymentTimedOut(deployment *appsv1.Deployment) bool {
+	// as per https://kubernetes.io/docs/concepts/workloads/controllers/deployment
+	for _, cond := range deployment.Status.Conditions {
+		// Look for Deployment with status False
+		if cond.Status != corev1.ConditionFalse {
+			continue
 		}
-		logger.Infof("Created fluentd configmap: %q", name)
-	} else if err != nil {
-		logger.Errorf("configmaps.Get for %q failed: %s", name, err)
-		return err
-	} else {
-		desiredConfigMap := resources.MakeFluentdConfigMap(rev, cfgs.Observability)
-		if !equality.Semantic.DeepEqual(configMap.Data, desiredConfigMap.Data) {
-			diff, err := kmp.SafeDiff(desiredConfigMap.Data, configMap.Data)
-			if err != nil {
-				return fmt.Errorf("failed to diff ConfigMap: %v", err)
-			}
-			logger.Infof("Reconciling fluentd configmap diff (-desired, +observed): %v", diff)
-
-			// Don't modify the informers copy
-			existing := configMap.DeepCopy()
-			existing.Data = desiredConfigMap.Data
-			_, err = c.KubeClientSet.CoreV1().ConfigMaps(ns).Update(existing)
-			if err != nil {
-				logger.Errorw("Error updating fluentd configmap", zap.Error(err))
-				return err
-			}
+		// with Type Progressing and Reason Timeout
+		// TODO(arvtiwar): hard coding "ProgressDeadlineExceeded" to avoid import kubernetes/kubernetes
+		if cond.Type == appsv1.DeploymentProgressing && cond.Reason == "ProgressDeadlineExceeded" {
+			return true
 		}
 	}
-	return nil
+	return false
 }

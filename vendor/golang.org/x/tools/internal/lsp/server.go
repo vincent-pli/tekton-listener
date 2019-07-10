@@ -53,10 +53,7 @@ func RunServerOnAddress(ctx context.Context, cache source.Cache, addr string, h 
 		if err != nil {
 			return err
 		}
-		stream := jsonrpc2.NewHeaderStream(conn, conn)
-		s := NewServer(cache, stream)
-		h(s)
-		go s.Run(ctx)
+		h(NewServer(cache, jsonrpc2.NewHeaderStream(conn, conn)))
 	}
 }
 
@@ -74,11 +71,16 @@ type Server struct {
 	// Configurations.
 	// TODO(rstambler): Separate these into their own struct?
 	usePlaceholders               bool
-	noDocsOnHover                 bool
+	hoverKind                     source.HoverKind
+	useDeepCompletions            bool
 	insertTextFormat              protocol.InsertTextFormat
 	configurationSupported        bool
 	dynamicConfigurationSupported bool
 	preferredContentFormat        protocol.MarkupKind
+	disabledAnalyses              map[string]struct{}
+	wantSuggestedFixes            bool
+
+	supportedCodeActions map[protocol.CodeActionKind]bool
 
 	textDocumentSyncKind protocol.TextDocumentSyncKind
 
@@ -186,8 +188,8 @@ func (s *Server) Implementation(context.Context, *protocol.TextDocumentPositionP
 	return nil, notImplemented("Implementation")
 }
 
-func (s *Server) References(context.Context, *protocol.ReferenceParams) ([]protocol.Location, error) {
-	return nil, notImplemented("References")
+func (s *Server) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	return s.references(ctx, params)
 }
 
 func (s *Server) DocumentHighlight(ctx context.Context, params *protocol.TextDocumentPositionParams) ([]protocol.DocumentHighlight, error) {
@@ -238,8 +240,8 @@ func (s *Server) OnTypeFormatting(context.Context, *protocol.DocumentOnTypeForma
 	return nil, notImplemented("OnTypeFormatting")
 }
 
-func (s *Server) Rename(context.Context, *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
-	return nil, notImplemented("Rename")
+func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
+	return s.rename(ctx, params)
 }
 
 func (s *Server) Declaration(context.Context, *protocol.TextDocumentPositionParams) ([]protocol.DeclarationLink, error) {

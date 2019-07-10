@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+
 	. "github.com/knative/pkg/logging/testing"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,12 +33,8 @@ import (
 
 const (
 	tickInterval = 5 * time.Millisecond
-	tickTimeout  = 50 * time.Millisecond
+	tickTimeout  = 100 * time.Millisecond
 )
-
-var testStatMessage = StatMessage{
-	Key: testKPAKey,
-}
 
 // watchFunc generates a function to assert the changes happening in the multiscaler.
 func watchFunc(ctx context.Context, ms *MultiScaler, decider *Decider, desiredScale int, errCh chan error) func(key string) {
@@ -99,7 +97,6 @@ func TestMultiScalerScaling(t *testing.T) {
 	}
 
 	errCh := make(chan error)
-	defer close(errCh)
 	ms.Watch(watchFunc(ctx, ms, decider, 1, errCh))
 
 	_, err = ms.Create(ctx, decider)
@@ -128,6 +125,50 @@ func TestMultiScalerScaling(t *testing.T) {
 	}
 }
 
+func TestMultiScalerTickUpdate(t *testing.T) {
+	ctx := context.Background()
+	ms, stopCh, statCh, uniScaler := createMultiScaler(t)
+	defer close(stopCh)
+	defer close(statCh)
+
+	decider := newDecider()
+	decider.Spec.TickInterval = 10 * time.Second
+	uniScaler.setScaleResult(1, true)
+
+	// Before it exists, we should get a NotFound.
+	m, err := ms.Get(ctx, decider.Namespace, decider.Name)
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("Get() = (%v, %v), want not found error", m, err)
+	}
+
+	_, err = ms.Create(ctx, decider)
+	if err != nil {
+		t.Errorf("Create() = %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Expected count to be 0 as the tick interval is 10s and no autoscaling calculation should be triggered
+	if count := uniScaler.getScaleCount(); count != 0 {
+		t.Fatalf("Expected count to be 0 but got %d", count)
+	}
+
+	decider.Spec.TickInterval = tickInterval
+
+	if _, err = ms.Update(ctx, decider); err != nil {
+		t.Errorf("Update() = %v", err)
+	}
+
+	if err := wait.PollImmediate(tickInterval, tickTimeout, func() (bool, error) {
+		// Expected count to be greater than 1 as the tick interval is updated to be 5ms
+		if uniScaler.getScaleCount() >= 1 {
+			return true, nil
+		}
+		return false, nil
+	}); err != nil {
+		t.Fatalf("Expected at least 1 tick but got %d", uniScaler.getScaleCount())
+	}
+}
+
 func TestMultiScalerScaleToZero(t *testing.T) {
 	ctx := context.Background()
 	ms, stopCh, statCh, uniScaler := createMultiScaler(t)
@@ -144,7 +185,6 @@ func TestMultiScalerScaleToZero(t *testing.T) {
 	}
 
 	errCh := make(chan error)
-	defer close(errCh)
 	ms.Watch(watchFunc(ctx, ms, decider, 0, errCh))
 
 	_, err = ms.Create(ctx, decider)
@@ -179,7 +219,6 @@ func TestMultiScalerScaleFromZero(t *testing.T) {
 	uniScaler.setScaleResult(1, true)
 
 	errCh := make(chan error)
-	defer close(errCh)
 	ms.Watch(watchFunc(ctx, ms, decider, 1, errCh))
 
 	_, err := ms.Create(ctx, decider)
@@ -225,7 +264,6 @@ func TestMultiScalerIgnoreNegativeScale(t *testing.T) {
 	}
 
 	errCh := make(chan error)
-	defer close(errCh)
 	ms.Watch(func(key string) {
 		// Let the main process know when this is called.
 		errCh <- nil
@@ -301,10 +339,11 @@ func createMultiScaler(t *testing.T) (*MultiScaler, chan<- struct{}, chan *StatM
 }
 
 type fakeUniScaler struct {
-	mutex    sync.Mutex
-	replicas int32
-	scaled   bool
-	lastStat Stat
+	mutex      sync.RWMutex
+	replicas   int32
+	scaled     bool
+	lastStat   Stat
+	scaleCount int
 }
 
 func (u *fakeUniScaler) fakeUniScalerFactory(*Decider) (UniScaler, error) {
@@ -314,8 +353,14 @@ func (u *fakeUniScaler) fakeUniScalerFactory(*Decider) (UniScaler, error) {
 func (u *fakeUniScaler) Scale(context.Context, time.Time) (int32, bool) {
 	u.mutex.Lock()
 	defer u.mutex.Unlock()
-
+	u.scaleCount++
 	return u.replicas, u.scaled
+}
+
+func (u *fakeUniScaler) getScaleCount() int {
+	u.mutex.RLock()
+	defer u.mutex.RUnlock()
+	return u.scaleCount
 }
 
 func (u *fakeUniScaler) setScaleResult(replicas int32, scaled bool) {
@@ -331,14 +376,6 @@ func (u *fakeUniScaler) Record(ctx context.Context, stat Stat) {
 	defer u.mutex.Unlock()
 
 	u.lastStat = stat
-}
-
-func (u *fakeUniScaler) checkLastStat(t *testing.T, stat Stat) {
-	t.Helper()
-
-	if u.lastStat != stat {
-		t.Fatalf("Last statistic recorded was %#v instead of expected statistic %#v", u.lastStat, stat)
-	}
 }
 
 func (u *fakeUniScaler) Update(DeciderSpec) error {

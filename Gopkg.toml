@@ -46,6 +46,15 @@ required = [
   name = "k8s.io/code-generator"
   version = "kubernetes-1.12.6"
 
+[[override]]
+  name = "github.com/knative/pkg"
+  # HEAD as of 2019-06-14 💖
+  revision = "68737b1b4e03d9a888e89ee2a44714a56eefd539"
+
+[[constraint]]
+  name="github.com/tektoncd/pipeline"
+  branch = "master"
+
 # For dependency below: Refer to issue https://github.com/golang/dep/issues/1799
 [[override]]
 name = "gopkg.in/fsnotify.v1"

@@ -19,10 +19,11 @@ package kpa
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
-	"github.com/knative/pkg/apis"
 	"github.com/knative/pkg/apis/duck"
+	"github.com/knative/pkg/injection/clients/dynamicclient"
 	"github.com/knative/pkg/logging"
 	"github.com/knative/serving/pkg/activator"
 	pav1alpha1 "github.com/knative/serving/pkg/apis/autoscaling/v1alpha1"
@@ -30,11 +31,10 @@ import (
 	"github.com/knative/serving/pkg/autoscaler"
 	"github.com/knative/serving/pkg/network"
 	"github.com/knative/serving/pkg/network/prober"
-	"github.com/knative/serving/pkg/reconciler"
 	"github.com/knative/serving/pkg/reconciler/autoscaling/config"
+	"github.com/knative/serving/pkg/resources"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 )
@@ -59,9 +59,10 @@ type scaler struct {
 	psInformerFactory duck.InformerFactory
 	dynamicClient     dynamic.Interface
 	logger            *zap.SugaredLogger
+	transportFactory  prober.TransportFactory
 
 	// For sync probes.
-	activatorProbe func(pa *pav1alpha1.PodAutoscaler) (bool, error)
+	activatorProbe func(pa *pav1alpha1.PodAutoscaler, transport http.RoundTripper) (bool, error)
 
 	// For async probes.
 	probeManager asyncProber
@@ -69,23 +70,25 @@ type scaler struct {
 }
 
 // newScaler creates a scaler.
-func newScaler(opt *reconciler.Options, enqueueCB func(interface{}, time.Duration)) *scaler {
+func newScaler(ctx context.Context, psInformerFactory duck.InformerFactory, enqueueCB func(interface{}, time.Duration)) *scaler {
+	logger := logging.FromContext(ctx)
 	ks := &scaler{
 		// Wrap it in a cache, so that we don't stamp out a new
 		// informer/lister each time.
-		psInformerFactory: &duck.CachedInformerFactory{
-			Delegate: podScalableTypedInformerFactory(opt),
+		psInformerFactory: psInformerFactory,
+		dynamicClient:     dynamicclient.Get(ctx),
+		logger:            logger,
+		transportFactory: func() http.RoundTripper {
+			return network.NewAutoTransport()
 		},
-		dynamicClient: opt.DynamicClientSet,
-		logger:        opt.Logger,
 
 		// Production setup uses the default probe implementation.
 		activatorProbe: activatorProbe,
 		probeManager: prober.New(func(arg interface{}, success bool, err error) {
-			opt.Logger.Infof("Async prober is done for %v: success?: %v error: %v", arg, success, err)
+			logger.Infof("Async prober is done for %v: success?: %v error: %v", arg, success, err)
 			// Re-enqeue the PA in any case. If the probe timed out to retry again, if succeeded to scale to 0.
 			enqueueCB(arg, reenqeuePeriod)
-		}),
+		}, network.NewAutoTransport),
 		enqueueCB: enqueueCB,
 	}
 	return ks
@@ -100,23 +103,12 @@ func paToProbeTarget(pa *pav1alpha1.PodAutoscaler) string {
 
 // activatorProbe returns true if via probe it determines that the
 // PA is backed by the Activator.
-func activatorProbe(pa *pav1alpha1.PodAutoscaler) (bool, error) {
+func activatorProbe(pa *pav1alpha1.PodAutoscaler, transport http.RoundTripper) (bool, error) {
 	// No service name -- no probe.
 	if pa.Status.ServiceName == "" {
 		return false, nil
 	}
-	return prober.Do(context.Background(), paToProbeTarget(pa), activator.Name)
-}
-
-// podScalableTypedInformerFactory returns a duck.InformerFactory that returns
-// lister/informer pairs for PodScalable resources.
-func podScalableTypedInformerFactory(opt *reconciler.Options) duck.InformerFactory {
-	return &duck.TypedInformerFactory{
-		Client:       opt.DynamicClientSet,
-		Type:         &pav1alpha1.PodScalable{},
-		ResyncPeriod: opt.ResyncPeriod,
-		StopChannel:  opt.StopChannel,
-	}
+	return prober.Do(context.Background(), transport, paToProbeTarget(pa), activator.Name)
 }
 
 // pre: 0 <= min <= max && 0 <= x
@@ -130,54 +122,22 @@ func applyBounds(min, max, x int32) int32 {
 	return x
 }
 
-// GetScaleResource returns the current scale resource for the PA.
-func (ks *scaler) GetScaleResource(pa *pav1alpha1.PodAutoscaler) (*pav1alpha1.PodScalable, error) {
-	gvr, name, err := scaleResourceArgs(pa)
-	if err != nil {
-		ks.logger.Errorf("Error getting the scale arguments", err)
-		return nil, err
-	}
-	_, lister, err := ks.psInformerFactory.Get(*gvr)
-	if err != nil {
-		ks.logger.Errorf("Error getting a lister for a pod scalable resource '%+v': %+v", gvr, err)
-		return nil, err
-	}
-
-	psObj, err := lister.ByNamespace(pa.Namespace).Get(name)
-	if err != nil {
-		ks.logger.Errorf("Error fetching Pod Scalable %q for PodAutoscaler %q: %v",
-			pa.Spec.ScaleTargetRef.Name, pa.Name, err)
-		return nil, err
-	}
-	return psObj.(*pav1alpha1.PodScalable), nil
-}
-
-// scaleResourceArgs returns GroupResource and the resource name, from the PA resource.
-func scaleResourceArgs(pa *pav1alpha1.PodAutoscaler) (*schema.GroupVersionResource, string, error) {
-	gv, err := schema.ParseGroupVersion(pa.Spec.ScaleTargetRef.APIVersion)
-	if err != nil {
-		return nil, "", err
-	}
-	resource := apis.KindToResource(gv.WithKind(pa.Spec.ScaleTargetRef.Kind))
-	return &resource, pa.Spec.ScaleTargetRef.Name, nil
-}
-
 func (ks *scaler) handleScaleToZero(pa *pav1alpha1.PodAutoscaler, desiredScale int32, config *autoscaler.Config) (int32, bool) {
 	if desiredScale != 0 {
 		return desiredScale, true
 	}
+
 	// We should only scale to zero when three of the following conditions are true:
 	//   a) enable-scale-to-zero from configmap is true
 	//   b) The PA has been active for at least the stable window, after which it gets marked inactive
 	//   c) The PA has been inactive for at least the grace period
 
-	if config.EnableScaleToZero == false {
+	if !config.EnableScaleToZero {
 		return 1, true
 	}
 
 	if pa.Status.IsActivating() { // Active=Unknown
-		// Don't scale-to-zero during activation
-		desiredScale = scaleUnknown
+		return scaleUnknown, false
 	} else if pa.Status.IsReady() { // Active=True
 		// Don't scale-to-zero if the PA is active
 
@@ -192,7 +152,7 @@ func (ks *scaler) handleScaleToZero(pa *pav1alpha1.PodAutoscaler, desiredScale i
 		ks.enqueueCB(pa, config.StableWindow)
 		desiredScale = 1
 	} else { // Active=False
-		r, err := ks.activatorProbe(pa)
+		r, err := ks.activatorProbe(pa, ks.transportFactory())
 		ks.logger.Infof("%s probing activator = %v, err = %v", pa.Name, r, err)
 		if r {
 			// Make sure we've been inactive for enough time.
@@ -212,6 +172,7 @@ func (ks *scaler) handleScaleToZero(pa *pav1alpha1.PodAutoscaler, desiredScale i
 		}
 		return desiredScale, false
 	}
+
 	return desiredScale, true
 }
 
@@ -219,7 +180,7 @@ func (ks *scaler) applyScale(ctx context.Context, pa *pav1alpha1.PodAutoscaler, 
 	ps *pav1alpha1.PodScalable) (int32, error) {
 	logger := logging.FromContext(ctx)
 
-	gvr, name, err := scaleResourceArgs(pa)
+	gvr, name, err := resources.ScaleResourceArguments(pa.Spec.ScaleTargetRef)
 	if err != nil {
 		return desiredScale, err
 	}
@@ -244,17 +205,11 @@ func (ks *scaler) applyScale(ctx context.Context, pa *pav1alpha1.PodAutoscaler, 
 
 	logger.Debug("Successfully scaled.")
 	return desiredScale, nil
-
 }
 
 // Scale attempts to scale the given PA's target reference to the desired scale.
 func (ks *scaler) Scale(ctx context.Context, pa *pav1alpha1.PodAutoscaler, desiredScale int32) (int32, error) {
 	logger := logging.FromContext(ctx)
-
-	desiredScale, shouldApplyScale := ks.handleScaleToZero(pa, desiredScale, config.FromContext(ctx).Autoscaler)
-	if !shouldApplyScale {
-		return desiredScale, nil
-	}
 
 	if desiredScale < 0 {
 		logger.Debug("Metrics are not yet being collected.")
@@ -267,16 +222,21 @@ func (ks *scaler) Scale(ctx context.Context, pa *pav1alpha1.PodAutoscaler, desir
 		desiredScale = newScale
 	}
 
-	ps, err := ks.GetScaleResource(pa)
+	desiredScale, shouldApplyScale := ks.handleScaleToZero(pa, desiredScale, config.FromContext(ctx).Autoscaler)
+	if !shouldApplyScale {
+		return desiredScale, nil
+	}
+
+	ps, err := resources.GetScaleResource(pa.Namespace, pa.Spec.ScaleTargetRef, ks.psInformerFactory)
 	if err != nil {
 		logger.Errorw(fmt.Sprintf("Resource %q not found", pa.Name), zap.Error(err))
 		return desiredScale, err
 	}
+
 	currentScale := int32(1)
 	if ps.Spec.Replicas != nil {
 		currentScale = *ps.Spec.Replicas
 	}
-
 	if desiredScale == currentScale {
 		return desiredScale, nil
 	}

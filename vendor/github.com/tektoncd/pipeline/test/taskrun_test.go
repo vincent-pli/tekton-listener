@@ -1,7 +1,7 @@
 // +build e2e
 
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -74,6 +74,14 @@ func TestTaskRunFailure(t *testing.T) {
 	expectedStepState := []v1alpha1.StepState{{
 		ContainerState: corev1.ContainerState{
 			Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 0,
+				Reason:   "Completed",
+			},
+		},
+		Name: "hello",
+	}, {
+		ContainerState: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{
 				ExitCode: 1,
 				Reason:   "Error",
 			},
@@ -86,23 +94,7 @@ func TestTaskRunFailure(t *testing.T) {
 				Reason:   "Completed",
 			},
 		},
-		Name: "hello",
-	}, {
-		ContainerState: corev1.ContainerState{
-			Terminated: &corev1.ContainerStateTerminated{
-				ExitCode: 0,
-				Reason:   "Completed",
-			},
-		},
 		Name: "world",
-	}, {
-		ContainerState: corev1.ContainerState{
-			Terminated: &corev1.ContainerStateTerminated{
-				ExitCode: 0,
-				Reason:   "Completed",
-			},
-		},
-		Name: "nop",
 	}}
 	ignoreFields := cmpopts.IgnoreFields(corev1.ContainerStateTerminated{}, "StartedAt", "FinishedAt", "ContainerID")
 	if d := cmp.Diff(taskrun.Status.Steps, expectedStepState, ignoreFields); d != "" {

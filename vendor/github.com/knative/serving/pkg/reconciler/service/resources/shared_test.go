@@ -26,7 +26,8 @@ import (
 
 	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	"github.com/knative/serving/pkg/apis/serving/v1beta1"
-	. "github.com/knative/serving/pkg/reconciler/testing"
+
+	. "github.com/knative/serving/pkg/testing/v1alpha1"
 )
 
 const (
@@ -42,7 +43,6 @@ const (
 	testLabelValuePinned       = "test-label-value-pinned"
 	testLabelValueRunLatest    = "test-label-value-run-latest"
 	testLabelValueRelease      = "test-label-value-release"
-	testLabelValueManual       = "test-label-value-manual"
 	testAnnotationKey          = "test-annotation-key"
 	testAnnotationValue        = "test-annotation-value"
 )
@@ -114,9 +114,4 @@ func createServiceWithRelease(numRevision int, rolloutPercent int) *v1alpha1.Ser
 	return Service(testServiceName, testServiceNamespace,
 		WithReleaseRolloutAndPercentageConfigSpec(rolloutPercent, createConfiguration(testContainerNameRelease), revisions...),
 		WithServiceLabel(testLabelKey, testLabelValueRelease))
-}
-
-func createServiceWithManual() *v1alpha1.Service {
-	return Service(testServiceName, testServiceNamespace, WithManualRollout,
-		WithServiceLabel(testLabelKey, testLabelValueManual))
 }

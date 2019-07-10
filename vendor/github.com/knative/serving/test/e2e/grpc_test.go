@@ -28,14 +28,16 @@ import (
 
 	pkgTest "github.com/knative/pkg/test"
 	ingress "github.com/knative/pkg/test/ingress"
+	"github.com/knative/pkg/test/logstream"
 	resourcenames "github.com/knative/serving/pkg/reconciler/revision/resources/names"
 	"github.com/knative/serving/test"
 	ping "github.com/knative/serving/test/test_images/grpc-ping/proto"
+	v1a1test "github.com/knative/serving/test/v1alpha1"
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 )
 
-type grpcTest func(*testing.T, *test.ResourceObjects, *test.Clients, string, string)
+type grpcTest func(*testing.T, *v1a1test.ResourceObjects, *test.Clients, string, string)
 
 // hasPort checks if a URL contains a port number
 func hasPort(u string) bool {
@@ -72,7 +74,7 @@ func dial(host, domain string) (*grpc.ClientConn, error) {
 	)
 }
 
-func unaryTest(t *testing.T, resources *test.ResourceObjects, clients *test.Clients, host, domain string) {
+func unaryTest(t *testing.T, resources *v1a1test.ResourceObjects, clients *test.Clients, host, domain string) {
 	t.Helper()
 	t.Logf("Connecting to grpc-ping using host %q and authority %q", host, domain)
 	conn, err := dial(host, domain)
@@ -96,7 +98,7 @@ func unaryTest(t *testing.T, resources *test.ResourceObjects, clients *test.Clie
 	}
 }
 
-func streamTest(t *testing.T, resources *test.ResourceObjects, clients *test.Clients, host, domain string) {
+func streamTest(t *testing.T, resources *v1a1test.ResourceObjects, clients *test.Clients, host, domain string) {
 	t.Helper()
 	t.Logf("Connecting to grpc-ping using host %q and authority %q", host, domain)
 	conn, err := dial(host, domain)
@@ -150,6 +152,9 @@ func streamTest(t *testing.T, resources *test.ResourceObjects, clients *test.Cli
 func testGRPC(t *testing.T, f grpcTest) {
 	t.Helper()
 	t.Parallel()
+	cancel := logstream.Start(t)
+	defer cancel()
+
 	// Setup
 	clients := Setup(t)
 
@@ -162,7 +167,7 @@ func testGRPC(t *testing.T, f grpcTest) {
 
 	test.CleanupOnInterrupt(func() { test.TearDown(clients, names) })
 	defer test.TearDown(clients, names)
-	resources, err := test.CreateRunLatestServiceReady(t, clients, &names, &test.Options{
+	resources, err := v1a1test.CreateRunLatestServiceReady(t, clients, &names, &v1a1test.Options{
 		ContainerPorts: []corev1.ContainerPort{{
 			Name:          "h2c",
 			ContainerPort: 8080,
@@ -177,7 +182,7 @@ func testGRPC(t *testing.T, f grpcTest) {
 		clients.KubeClient,
 		t.Logf,
 		domain,
-		test.RetryingRouteInconsistency(pkgTest.IsStatusOK),
+		v1a1test.RetryingRouteInconsistency(pkgTest.IsStatusOK),
 		"gRPCPingReadyToServe",
 		test.ServingFlags.ResolvableDomain); err != nil {
 		t.Fatalf("The endpoint for Route %s at domain %s didn't return success: %v", names.Route, domain, err)
@@ -206,7 +211,7 @@ func TestGRPCStreamingPing(t *testing.T) {
 }
 
 func TestGRPCUnaryPingFromZero(t *testing.T) {
-	testGRPC(t, func(t *testing.T, resources *test.ResourceObjects, clients *test.Clients, host, domain string) {
+	testGRPC(t, func(t *testing.T, resources *v1a1test.ResourceObjects, clients *test.Clients, host, domain string) {
 		if err := WaitForScaleToZero(t, resourcenames.Deployment(resources.Revision), clients); err != nil {
 			t.Fatalf("Could not scale to zero: %v", err)
 		}
@@ -216,7 +221,7 @@ func TestGRPCUnaryPingFromZero(t *testing.T) {
 }
 
 func TestGRPCStreamingPingFromZero(t *testing.T) {
-	testGRPC(t, func(t *testing.T, resources *test.ResourceObjects, clients *test.Clients, host, domain string) {
+	testGRPC(t, func(t *testing.T, resources *v1a1test.ResourceObjects, clients *test.Clients, host, domain string) {
 		if err := WaitForScaleToZero(t, resourcenames.Deployment(resources.Revision), clients); err != nil {
 			t.Fatalf("Could not scale to zero: %v", err)
 		}

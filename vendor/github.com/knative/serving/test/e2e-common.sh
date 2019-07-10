@@ -15,40 +15,19 @@
 # limitations under the License.
 
 # Temporarily increasing the cluster size for serving tests to rule out
-# resource / eviction as causes of flakiness.  These env vars are consumed
-# in the test-infra/scripts/e2e-tests.sh.
-E2E_MIN_CLUSTER_NODES=4
-E2E_MAX_CLUSTER_NODES=4
+# resource/eviction as causes of flakiness. These env vars are consumed
+# in the test-infra/scripts/e2e-tests.sh. Use the existing value, if provided
+# with the job config.
+E2E_MIN_CLUSTER_NODES=${E2E_MIN_CLUSTER_NODES:-4}
+E2E_MAX_CLUSTER_NODES=${E2E_MAX_CLUSTER_NODES:-4}
 
 # This script provides helper methods to perform cluster actions.
 source $(dirname $0)/../vendor/github.com/knative/test-infra/scripts/e2e-tests.sh
 
-# Choose a correct istio-crds.yaml file.
-# - $1 specifies Istio version.
-function istio_crds_yaml() {
-  local istio_version="$1"
-  echo "./third_party/istio-${istio_version}/istio-crds.yaml"
-}
-
-# Choose a correct cert-manager.yaml file.
-# - $1 specifies cert-manager version.
-function cert_manager_yaml() {
-  local cert_manager_version="$1"
-  echo "./third_party/cert-manager-${cert_manager_version}/cert-manager.yaml" 
-}
-
-# Choose a correct istio.yaml file.
-# - $1 specifies Istio version.
-# - $2 specifies whether we should use mesh.
-function istio_yaml() {
-  local istio_version="$1"
-  local istio_mesh=$2
-  local suffix=""
-  if [[ $istio_mesh -eq 0 ]]; then
-    suffix="-lean"
-  fi
-  echo "./third_party/istio-${istio_version}/istio${suffix}.yaml"
-}
+# Default Istio configuration to install: 1.1-latest, no mesh, cert manager 0.6.1.
+ISTIO_VERSION="1.1-latest"
+ISTIO_MESH=0
+CERT_MANAGER_VERSION="0.6.1"
 
 # Current YAMLs used to install Knative Serving.
 INSTALL_RELEASE_YAML=""
@@ -56,9 +35,7 @@ INSTALL_MONITORING_YAML=""
 
 INSTALL_MONITORING=0
 
-# Build is used by some tests and so is also included here.
-readonly INSTALL_BUILD_DIR="./third_party/config/build/"
-readonly INSTALL_PIPELINE_DIR="./third_party/config/pipeline/"
+INSTALL_BETA=1
 
 # List of custom YAMLs to install, if specified (space-separated).
 INSTALL_CUSTOM_YAMLS=""
@@ -67,7 +44,7 @@ INSTALL_CUSTOM_YAMLS=""
 function parse_flags() {
   case "$1" in
     --istio-version)
-      [[ $2 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || abort "version format must be '[0-9].[0-9].[0-9]'"
+      [[ $2 =~ ^[0-9]+\.[0-9]+(\.[0-9]+|\-latest)$ ]] || abort "version format must be '[0-9].[0-9].[0-9]' or '[0-9].[0-9]-latest"
       readonly ISTIO_VERSION=$2
       return 2
       ;;
@@ -86,6 +63,14 @@ function parse_flags() {
       ;;
     --install-monitoring)
       readonly INSTALL_MONITORING=1
+      return 1
+      ;;
+    --install-alpha)
+      readonly INSTALL_BETA=0
+      return 1
+      ;;
+    --install-beta)
+      readonly INSTALL_BETA=1
       return 1
       ;;
     --custom-yamls)
@@ -147,37 +132,26 @@ function install_knative_serving_standard() {
   if [[ -z "$1" ]]; then
     # install_knative_serving_standard was called with no arg.
     build_knative_from_source
-    INSTALL_RELEASE_YAML="${SERVING_YAML}"
+    if (( INSTALL_BETA )); then
+      INSTALL_RELEASE_YAML="${SERVING_BETA_YAML}"
+    else
+      INSTALL_RELEASE_YAML="${SERVING_ALPHA_YAML}"
+    fi
     if (( INSTALL_MONITORING )); then
       INSTALL_MONITORING_YAML="${MONITORING_YAML}"
     fi
   fi
 
-  # Decide the Istio configuration to install.
-  if [[ -z "$ISTIO_VERSION" ]]; then
-     # Defaults to 1.1-latest
-     ISTIO_VERSION=1.1-latest
-  fi
-  if [[ -z "$ISTIO_MESH" ]]; then
-    # Defaults to using mesh.
-    ISTIO_MESH=1
-  fi
-  INSTALL_ISTIO_CRD_YAML="$(istio_crds_yaml $ISTIO_VERSION)"
-  INSTALL_ISTIO_YAML="$(istio_yaml $ISTIO_VERSION $ISTIO_MESH)"
-
-  if [[ -z "$CERT_MANAGER_VERSION" ]]; then
-    # Defaults to 0.6.1
-    CERT_MANAGER_VERSION=0.6.1
-  fi
-  INSTALL_CERT_MANAGER_YAML="$(cert_manager_yaml $CERT_MANAGER_VERSION)"
+  local istio_base="./third_party/istio-${ISTIO_VERSION}"
+  INSTALL_ISTIO_CRD_YAML="${istio_base}/istio-crds.yaml"
+  (( ISTIO_MESH )) && INSTALL_ISTIO_YAML="${istio_base}/istio.yaml" || INSTALL_ISTIO_YAML="${istio_base}/istio-lean.yaml"
+  INSTALL_CERT_MANAGER_YAML="./third_party/cert-manager-${CERT_MANAGER_VERSION}/cert-manager.yaml"
 
   echo ">> Installing Knative serving"
   echo "Istio CRD YAML: ${INSTALL_ISTIO_CRD_YAML}"
   echo "Istio YAML: ${INSTALL_ISTIO_YAML}"
   echo "Cert Manager YAML: ${INSTALL_CERT_MANAGER_YAML}"
   echo "Knative YAML: ${INSTALL_RELEASE_YAML}"
-  echo "Knative Build YAML: ${INSTALL_BUILD_DIR}"
-  echo "Knative Build Pipeline YAML: ${INSTALL_PIPELINE_DIR}"
 
   echo ">> Bringing up Istio"
   echo ">> Running Istio CRD installer"
@@ -189,11 +163,6 @@ function install_knative_serving_standard() {
 
   echo ">> Installing Cert-Manager"
   kubectl apply -f "${INSTALL_CERT_MANAGER_YAML}" --validate=false || return 1
-
-  echo ">> Installing Build"
-  # TODO: should this use a released copy of Build?
-  kubectl apply -f "${INSTALL_BUILD_DIR}" || return 1
-  kubectl apply -f "${INSTALL_PIPELINE_DIR}" || return 1
 
   echo ">> Bringing up Serving"
   kubectl apply -f "${INSTALL_RELEASE_YAML}" || return 1
@@ -260,22 +229,16 @@ function knative_teardown() {
   else
     echo ">> Uninstalling Knative serving"
     echo "Istio YAML: ${INSTALL_ISTIO_YAML}"
-    echo "Cert-Manager CRD YAML: ${INSTALL_CERT_MANAGER_CRD_YAML}"
+    echo "Cert-Manager YAML: ${INSTALL_CERT_MANAGER_YAML}"
     echo "Knative YAML: ${INSTALL_RELEASE_YAML}"
-    echo "Knative Build YAML: ${INSTALL_BUILD_DIR}"
-    echo "Knative Build Pipeline YAML: ${INSTALL_PIPELINE_DIR}"
     echo ">> Bringing down Serving"
     ko delete --ignore-not-found=true -f "${INSTALL_RELEASE_YAML}" || return 1
     if [[ -n "${INSTALL_MONITORING_YAML}" ]]; then
       echo ">> Bringing down monitoring"
       ko delete --ignore-not-found=true -f "${INSTALL_MONITORING_YAML}" || return 1
     fi
-    echo ">> Bringing down Build"
-    ko delete --ignore-not-found=true -f "${INSTALL_BUILD_DIR}" || return 1
-    ko delete --ignore-not-found=true -f "${INSTALL_PIPELINE_DIR}" || return 1
     echo ">> Bringing down Istio"
     kubectl delete --ignore-not-found=true -f "${INSTALL_ISTIO_YAML}" || return 1
-    kubectl delete --ignore-not-found=true clusterrolebinding cluster-admin-binding
     echo ">> Bringing down Cert-Manager"
     kubectl delete --ignore-not-found=true -f "${INSTALL_CERT_MANAGER_YAML}" || return 1
   fi
@@ -285,10 +248,6 @@ function knative_teardown() {
 function test_setup() {
   echo ">> Creating test resources (test/config/)"
   ko apply -f test/config/ || return 1
-  echo ">> Creating test namespaces"
-  kubectl create namespace serving-tests
-  kubectl create namespace serving-tests-alt
-
   ${REPO_ROOT_DIR}/test/upload-test-images.sh || return 1
   wait_until_pods_running knative-serving || return 1
   wait_until_pods_running istio-system || return 1
@@ -302,9 +261,23 @@ function test_setup() {
 function test_teardown() {
   echo ">> Removing test resources (test/config/)"
   ko delete --ignore-not-found=true --now -f test/config/
-  echo ">> Removing test namespaces"
+  echo ">> Ensuring test namespaces are clean"
   kubectl delete all --all --ignore-not-found --now --timeout 60s -n serving-tests
   kubectl delete --ignore-not-found --now --timeout 60s namespace serving-tests
   kubectl delete all --all --ignore-not-found --now --timeout 60s -n serving-tests-alt
   kubectl delete --ignore-not-found --now --timeout 60s namespace serving-tests-alt
+}
+
+# Dump more information when test fails.
+function dump_extra_cluster_state() {
+  echo ">>> Routes:"
+  kubectl get routes -o yaml --all-namespaces
+  echo ">>> Configurations:"
+  kubectl get configurations -o yaml --all-namespaces
+  echo ">>> Revisions:"
+  kubectl get revisions -o yaml --all-namespaces
+
+  for app in controller webhook autoscaler activator networking-certmanager networking-istio; do
+    dump_app_logs ${app} knative-serving
+  done
 }

@@ -53,7 +53,9 @@ type activationHandler struct {
 	reporter  activator.StatsReporter
 	throttler *activator.Throttler
 
-	probeTimeout time.Duration
+	probeTimeout          time.Duration
+	probeTransportFactory prober.TransportFactory
+	endpointTimeout       time.Duration
 
 	revisionLister servinglisters.RevisionLister
 	serviceLister  corev1listers.ServiceLister
@@ -68,13 +70,6 @@ func New(l *zap.SugaredLogger, r activator.StatsReporter, t *activator.Throttler
 	rl servinglisters.RevisionLister, sl corev1listers.ServiceLister,
 	sksL netlisters.ServerlessServiceLister) http.Handler {
 
-	// In activator we collect metrics, so we're wrapping
-	// the Roundtripper the prober would use inside annotating transport.
-	prober.TransportFactory = func() http.RoundTripper {
-		return &ochttp.Transport{
-			Base: network.NewAutoTransport(),
-		}
-	}
 	return &activationHandler{
 		logger:         l,
 		transport:      network.AutoTransport,
@@ -84,6 +79,14 @@ func New(l *zap.SugaredLogger, r activator.StatsReporter, t *activator.Throttler
 		sksLister:      sksL,
 		serviceLister:  sl,
 		probeTimeout:   defaulTimeout,
+		// In activator we collect metrics, so we're wrapping
+		// the Roundtripper the prober would use inside annotating transport.
+		probeTransportFactory: func() http.RoundTripper {
+			return &ochttp.Transport{
+				Base: network.NewAutoTransport(),
+			}
+		},
+		endpointTimeout: defaulTimeout,
 	}
 }
 
@@ -105,12 +108,12 @@ func (a *activationHandler) probeEndpoint(logger *zap.SugaredLogger, r *http.Req
 	reqCtx, probeSpan := trace.StartSpan(r.Context(), "probe")
 	defer func() {
 		probeSpan.End()
-		a.logger.Infof("Probing %s took %d attempts and %v time", target.String(), attempts, time.Since(st))
+		a.logger.Debugf("Probing %s took %d attempts and %v time", target.String(), attempts, time.Since(st))
 	}()
 
 	err := wait.PollImmediate(100*time.Millisecond, a.probeTimeout, func() (bool, error) {
 		attempts++
-		ret, err := prober.Do(reqCtx, target.String(), queue.Name, withOrigProto(r))
+		ret, err := prober.Do(reqCtx, a.probeTransportFactory(), target.String(), queue.Name, withOrigProto(r))
 		if err != nil {
 			logger.Warnw("Pod probe failed", zap.Error(err))
 			return false, nil
@@ -158,10 +161,15 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Host:   host,
 	}
 
-	err = a.throttler.Try(revID, func() {
+	_, ttSpan := trace.StartSpan(r.Context(), "throttler_try")
+	ttStart := time.Now()
+	err = a.throttler.Try(a.endpointTimeout, revID, func() {
 		var (
 			httpStatus int
 		)
+
+		ttSpan.End()
+		a.logger.Debugf("Waiting for throttler took %v time", time.Since(ttStart))
 
 		success, attempts := a.probeEndpoint(logger, r, target)
 		if success {
@@ -189,6 +197,12 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.reporter.ReportResponseTime(namespace, serviceName, configurationName, name, httpStatus, duration)
 	})
 	if err != nil {
+		// Set error on our capacity waiting span and end it
+		ttSpan.Annotate([]trace.Attribute{
+			trace.StringAttribute("activator.throttler.error", err.Error()),
+		}, "ThrottlerTry")
+		ttSpan.End()
+
 		if err == activator.ErrActivatorOverload {
 			http.Error(w, activator.ErrActivatorOverload.Error(), http.StatusServiceUnavailable)
 		} else {

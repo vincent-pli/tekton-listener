@@ -32,19 +32,20 @@ import (
 	"github.com/knative/pkg/test/zipkin"
 	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
 	"github.com/knative/serving/pkg/reconciler/revision/resources/names"
-	ktest "github.com/knative/serving/pkg/reconciler/testing"
+	ktest "github.com/knative/serving/pkg/testing/v1alpha1"
 	"github.com/knative/serving/test"
 	"github.com/knative/serving/test/e2e"
+	v1a1test "github.com/knative/serving/test/v1alpha1"
 	"github.com/knative/test-infra/shared/junit"
+	perf "github.com/knative/test-infra/shared/performance"
 	"github.com/knative/test-infra/shared/testgrid"
 )
 
 const (
-	serviceName                      = "perftest-scalefromzero"
-	ScaleFromZeroAvgTestGridProperty = "perf_ScaleFromZero_Average"
-	helloWorldExpectedOutput         = "Hello World!"
-	helloWorldImage                  = "helloworld"
-	waitToServe                      = 10 * time.Minute
+	serviceName              = "perftest-scalefromzero"
+	helloWorldExpectedOutput = "Hello World!"
+	helloWorldImage          = "helloworld"
+	waitToServe              = 10 * time.Minute
 )
 
 type stats struct {
@@ -53,7 +54,7 @@ type stats struct {
 	max time.Duration
 }
 
-func runScaleFromZero(idx int, t *testing.T, clients *test.Clients, ro *test.ResourceObjects) (time.Duration, error) {
+func runScaleFromZero(idx int, t *testing.T, clients *test.Clients, ro *v1a1test.ResourceObjects) (time.Duration, error) {
 	t.Helper()
 	deploymentName := names.Deployment(ro.Revision)
 
@@ -114,7 +115,7 @@ func parallelScaleFromZero(t *testing.T, count int) ([]time.Duration, error) {
 	defer cleanupNames()
 	test.CleanupOnInterrupt(cleanupNames)
 
-	objs := make([]*test.ResourceObjects, count)
+	objs := make([]*v1a1test.ResourceObjects, count)
 	begin := time.Now()
 	defer func() {
 		t.Logf("Total time for test: %v", time.Since(begin))
@@ -138,8 +139,8 @@ func parallelScaleFromZero(t *testing.T, count int) ([]time.Duration, error) {
 		ndx := i
 		g.Go(func() error {
 			var err error
-			if objs[ndx], err = test.CreateRunLatestServiceReady(
-				t, pc.E2EClients, testNames[ndx], &test.Options{}, sos...); err != nil {
+			if objs[ndx], err = v1a1test.CreateRunLatestServiceReady(
+				t, pc.E2EClients, testNames[ndx], &v1a1test.Options{}, sos...); err != nil {
 				return fmt.Errorf("%02d: failed to create Ready service: %v", ndx, err)
 			}
 			return nil
@@ -221,9 +222,9 @@ func testScaleFromZero(t *testing.T, count, numRuns int) {
 	stats := getMultiRunStats(runStats)
 
 	if err := testgrid.CreateXMLOutput([]junit.TestCase{
-		CreatePerfTestCase(float32(stats.avg.Seconds()), "Average", tName),
-		CreatePerfTestCase(float32(stats.min.Seconds()), "Min", tName),
-		CreatePerfTestCase(float32(stats.max.Seconds()), "Max", tName)}, tName); err != nil {
+		perf.CreatePerfTestCase(float32(stats.avg.Seconds()), "Average", tName),
+		perf.CreatePerfTestCase(float32(stats.min.Seconds()), "Min", tName),
+		perf.CreatePerfTestCase(float32(stats.max.Seconds()), "Max", tName)}, tName); err != nil {
 		t.Fatalf("Error creating testgrid output: %v", err)
 	}
 }

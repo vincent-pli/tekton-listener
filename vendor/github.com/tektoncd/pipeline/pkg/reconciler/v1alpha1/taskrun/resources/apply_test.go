@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors.
+Copyright 2019 The Tekton Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,13 +30,72 @@ var simpleTaskSpec = &v1alpha1.TaskSpec{
 		Name:  "foo",
 		Image: "${inputs.params.myimage}",
 	}, {
-		Name:  "baz",
-		Image: "bat",
-		Args:  []string{"${inputs.resources.workspace.url}"},
+		Name:       "baz",
+		Image:      "bat",
+		WorkingDir: "${inputs.resources.workspace.path}",
+		Args:       []string{"${inputs.resources.workspace.url}"},
 	}, {
 		Name:  "qux",
 		Image: "quux",
 		Args:  []string{"${outputs.resources.imageToUse.url}"},
+	}},
+}
+
+var envTaskSpec = &v1alpha1.TaskSpec{
+	Steps: []corev1.Container{{
+		Name:  "foo",
+		Image: "busybox:${inputs.params.FOO}",
+		Env: []corev1.EnvVar{{
+			Name:  "foo",
+			Value: "value-${inputs.params.FOO}",
+		}, {
+			Name: "bar",
+			ValueFrom: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "config-${inputs.params.FOO}"},
+					Key:                  "config-key-${inputs.params.FOO}",
+				},
+			},
+		}, {
+			Name: "baz",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "secret-${inputs.params.FOO}"},
+					Key:                  "secret-key-${inputs.params.FOO}",
+				},
+			},
+		}},
+		EnvFrom: []corev1.EnvFromSource{{
+			Prefix: "prefix-0-${inputs.params.FOO}",
+			ConfigMapRef: &corev1.ConfigMapEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "config-${inputs.params.FOO}"},
+			},
+		}, {
+			Prefix: "prefix-1-${inputs.params.FOO}",
+			SecretRef: &corev1.SecretEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "secret-${inputs.params.FOO}"},
+			},
+		}},
+	}},
+}
+
+var containerTemplateTaskSpec = &v1alpha1.TaskSpec{
+	ContainerTemplate: &corev1.Container{
+		Env: []corev1.EnvVar{{
+			Name:  "template-var",
+			Value: "${inputs.params.FOO}",
+		}},
+	},
+	Steps: []corev1.Container{{
+		Name:  "simple-image",
+		Image: "${inputs.params.myimage}",
+	}, {
+		Name:  "image-with-env-specified",
+		Image: "some-other-image",
+		Env: []corev1.EnvVar{{
+			Name:  "template-var",
+			Value: "overridden-value",
+		}},
 	}},
 }
 
@@ -49,6 +108,14 @@ var volumeMountTaskSpec = &v1alpha1.TaskSpec{
 			MountPath: "path/to/${inputs.params.FOO}",
 			SubPath:   "sub/${inputs.params.FOO}/path",
 		}},
+	}},
+}
+
+var gcsTaskSpec = &v1alpha1.TaskSpec{
+	Steps: []corev1.Container{{
+		Name:  "foobar",
+		Image: "someImage",
+		Args:  []string{"${outputs.resources.bucket.path}"},
 	}},
 }
 
@@ -65,21 +132,16 @@ var paramTaskRun = &v1alpha1.TaskRun{
 	},
 }
 
-var inputs = []v1alpha1.TaskResourceBinding{{
-	ResourceRef: v1alpha1.PipelineResourceRef{
-		Name: "git-resource",
-	},
-	Name: "workspace",
-}}
+var inputs = map[string]v1alpha1.PipelineResourceInterface{
+	"workspace": gitResource,
+}
 
-var outputs = []v1alpha1.TaskResourceBinding{{
-	ResourceRef: v1alpha1.PipelineResourceRef{
-		Name: "image-resource",
-	},
-	Name: "imageToUse",
-}}
+var outputs = map[string]v1alpha1.PipelineResourceInterface{
+	"imageToUse": imageResource,
+	"bucket":     gcsResource,
+}
 
-var gitResource = &v1alpha1.PipelineResource{
+var gitResource, _ = v1alpha1.ResourceFromType(&v1alpha1.PipelineResource{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "git-resource",
 	},
@@ -92,9 +154,9 @@ var gitResource = &v1alpha1.PipelineResource{
 			},
 		},
 	},
-}
+})
 
-var imageResource = &v1alpha1.PipelineResource{
+var imageResource, _ = v1alpha1.ResourceFromType(&v1alpha1.PipelineResource{
 	ObjectMeta: metav1.ObjectMeta{
 		Name: "image-resource",
 	},
@@ -107,7 +169,26 @@ var imageResource = &v1alpha1.PipelineResource{
 			},
 		},
 	},
-}
+})
+
+var gcsResource, _ = v1alpha1.ResourceFromType(&v1alpha1.PipelineResource{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "gcs-resource",
+	},
+	Spec: v1alpha1.PipelineResourceSpec{
+		Type: v1alpha1.PipelineResourceTypeStorage,
+		Params: []v1alpha1.Param{
+			{
+				Name:  "type",
+				Value: "gcs",
+			},
+			{
+				Name:  "location",
+				Value: "theCloud?",
+			},
+		},
+	},
+})
 
 func applyMutation(ts *v1alpha1.TaskSpec, f func(*v1alpha1.TaskSpec)) *v1alpha1.TaskSpec {
 	ts = ts.DeepCopy()
@@ -115,11 +196,16 @@ func applyMutation(ts *v1alpha1.TaskSpec, f func(*v1alpha1.TaskSpec)) *v1alpha1.
 	return ts
 }
 
+func setup() {
+	inputs["workspace"].SetDestinationDirectory("/workspace/workspace")
+	outputs["bucket"].SetDestinationDirectory("/workspace/outputs/bucket")
+}
+
 func TestApplyParameters(t *testing.T) {
 	type args struct {
 		ts *v1alpha1.TaskSpec
 		tr *v1alpha1.TaskRun
-		dp []v1alpha1.TaskParam
+		dp []v1alpha1.ParamSpec
 	}
 	tests := []struct {
 		name string
@@ -156,11 +242,63 @@ func TestApplyParameters(t *testing.T) {
 			spec.Steps[0].Image = "busybox:world"
 		}),
 	}, {
+		name: "envs parameter",
+		args: args{
+			ts: envTaskSpec,
+			tr: &v1alpha1.TaskRun{
+				Spec: v1alpha1.TaskRunSpec{
+					Inputs: v1alpha1.TaskRunInputs{
+						Params: []v1alpha1.Param{{
+							Name:  "FOO",
+							Value: "world",
+						}},
+					},
+				},
+			},
+		},
+		want: applyMutation(envTaskSpec, func(spec *v1alpha1.TaskSpec) {
+			spec.Steps[0].Env[0].Value = "value-world"
+			spec.Steps[0].Env[1].ValueFrom.ConfigMapKeyRef.LocalObjectReference.Name = "config-world"
+			spec.Steps[0].Env[1].ValueFrom.ConfigMapKeyRef.Key = "config-key-world"
+			spec.Steps[0].Env[2].ValueFrom.SecretKeyRef.LocalObjectReference.Name = "secret-world"
+			spec.Steps[0].Env[2].ValueFrom.SecretKeyRef.Key = "secret-key-world"
+			spec.Steps[0].EnvFrom[0].Prefix = "prefix-0-world"
+			spec.Steps[0].EnvFrom[0].ConfigMapRef.LocalObjectReference.Name = "config-world"
+			spec.Steps[0].EnvFrom[1].Prefix = "prefix-1-world"
+			spec.Steps[0].EnvFrom[1].SecretRef.LocalObjectReference.Name = "secret-world"
+			spec.Steps[0].Image = "busybox:world"
+		}),
+	}, {
+		name: "containerTemplate parameter",
+		args: args{
+			ts: containerTemplateTaskSpec,
+			tr: &v1alpha1.TaskRun{
+				Spec: v1alpha1.TaskRunSpec{
+					Inputs: v1alpha1.TaskRunInputs{
+						Params: []v1alpha1.Param{{
+							Name:  "FOO",
+							Value: "BAR",
+						}},
+					},
+				},
+			},
+			dp: []v1alpha1.ParamSpec{
+				{
+					Name:    "myimage",
+					Default: "replaced-image-name",
+				},
+			},
+		},
+		want: applyMutation(containerTemplateTaskSpec, func(spec *v1alpha1.TaskSpec) {
+			spec.ContainerTemplate.Env[0].Value = "BAR"
+			spec.Steps[0].Image = "replaced-image-name"
+		}),
+	}, {
 		name: "with default parameter",
 		args: args{
 			ts: simpleTaskSpec,
 			tr: &v1alpha1.TaskRun{},
-			dp: []v1alpha1.TaskParam{
+			dp: []v1alpha1.ParamSpec{
 				{
 					Name:    "myimage",
 					Default: "mydefault",
@@ -181,70 +319,61 @@ func TestApplyParameters(t *testing.T) {
 	}
 }
 
-var mockGetter = func(n string) (*v1alpha1.PipelineResource, error) { return &v1alpha1.PipelineResource{}, nil }
-var gitResourceGetter = func(n string) (*v1alpha1.PipelineResource, error) { return gitResource, nil }
-var imageResourceGetter = func(n string) (*v1alpha1.PipelineResource, error) { return imageResource, nil }
-
 func TestApplyResources(t *testing.T) {
 	type args struct {
-		ts     *v1alpha1.TaskSpec
-		r      []v1alpha1.TaskResourceBinding
-		getter GetResource
-		rStr   string
+		ts   *v1alpha1.TaskSpec
+		r    map[string]v1alpha1.PipelineResourceInterface
+		rStr string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    *v1alpha1.TaskSpec
-		wantErr bool
+		name string
+		args args
+		want *v1alpha1.TaskSpec
 	}{{
 		name: "no replacements specified",
 		args: args{
-			ts:     simpleTaskSpec,
-			r:      []v1alpha1.TaskResourceBinding{},
-			getter: mockGetter,
-			rStr:   "inputs",
+			ts:   simpleTaskSpec,
+			r:    make(map[string]v1alpha1.PipelineResourceInterface),
+			rStr: "inputs",
 		},
 		want: simpleTaskSpec,
 	}, {
 		name: "input resource specified",
 		args: args{
-			ts:     simpleTaskSpec,
-			r:      inputs,
-			getter: gitResourceGetter,
-			rStr:   "inputs",
+			ts:   simpleTaskSpec,
+			r:    inputs,
+			rStr: "inputs",
 		},
 		want: applyMutation(simpleTaskSpec, func(spec *v1alpha1.TaskSpec) {
+			spec.Steps[1].WorkingDir = "/workspace/workspace"
 			spec.Steps[1].Args = []string{"https://git-repo"}
 		}),
 	}, {
 		name: "output resource specified",
 		args: args{
-			ts:     simpleTaskSpec,
-			r:      outputs,
-			getter: imageResourceGetter,
-			rStr:   "outputs",
+			ts:   simpleTaskSpec,
+			r:    outputs,
+			rStr: "outputs",
 		},
 		want: applyMutation(simpleTaskSpec, func(spec *v1alpha1.TaskSpec) {
 			spec.Steps[2].Args = []string{"gcr.io/hans/sandwiches"}
 		}),
 	}, {
-		name: "resource does not exist",
+		name: "output resource specified with path replacement",
 		args: args{
-			ts:     simpleTaskSpec,
-			r:      inputs,
-			getter: mockGetter,
-			rStr:   "inputs",
+			ts:   gcsTaskSpec,
+			r:    outputs,
+			rStr: "outputs",
 		},
-		wantErr: true,
-	}}
+		want: applyMutation(gcsTaskSpec, func(spec *v1alpha1.TaskSpec) {
+			spec.Steps[0].Args = []string{"/workspace/outputs/bucket"}
+		}),
+	},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ApplyResources(tt.args.ts, tt.args.r, tt.args.getter, tt.args.rStr)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyResources() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+			setup()
+			got := ApplyResources(tt.args.ts, tt.args.r, tt.args.rStr)
 			if d := cmp.Diff(got, tt.want); d != "" {
 				t.Errorf("ApplyResources() diff %s", d)
 			}

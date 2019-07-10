@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -30,11 +29,15 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	pkgTest "github.com/knative/pkg/test"
+	"github.com/knative/pkg/test/logstream"
+	"github.com/knative/serving/pkg/apis/serving"
 	"github.com/knative/serving/pkg/apis/serving/v1alpha1"
-	rnames "github.com/knative/serving/pkg/reconciler/revision/resources/names"
 	"github.com/knative/serving/test"
+	v1a1test "github.com/knative/serving/test/v1alpha1"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -45,10 +48,13 @@ const (
 
 func TestDestroyPodInflight(t *testing.T) {
 	t.Parallel()
+	cancel := logstream.Start(t)
+	defer cancel()
+
 	clients := Setup(t)
 
 	t.Log("Creating a new Route and Configuration")
-	names, err := CreateRouteAndConfig(t, clients, "timeout", &test.Options{RevisionTimeoutSeconds: revisionTimeoutSeconds})
+	names, err := CreateRouteAndConfig(t, clients, "timeout", &v1a1test.Options{RevisionTimeoutSeconds: revisionTimeoutSeconds})
 	if err != nil {
 		t.Fatalf("Failed to create Route and Configuration: %v", err)
 	}
@@ -56,17 +62,17 @@ func TestDestroyPodInflight(t *testing.T) {
 	defer test.TearDown(clients, names)
 
 	t.Log("When the Revision can have traffic routed to it, the Route is marked as Ready")
-	if err := test.WaitForRouteState(clients.ServingClient, names.Route, test.IsRouteReady, "RouteIsReady"); err != nil {
+	if err := v1a1test.WaitForRouteState(clients.ServingAlphaClient, names.Route, v1a1test.IsRouteReady, "RouteIsReady"); err != nil {
 		t.Fatalf("The Route %s was not marked as Ready to serve traffic: %v", names.Route, err)
 	}
 
-	route, err := clients.ServingClient.Routes.Get(names.Route, metav1.GetOptions{})
+	route, err := clients.ServingAlphaClient.Routes.Get(names.Route, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Error fetching Route %s: %v", names.Route, err)
 	}
 	domain := route.Status.URL.Host
 
-	err = test.WaitForConfigurationState(clients.ServingClient, names.Config, func(c *v1alpha1.Configuration) (bool, error) {
+	err = v1a1test.WaitForConfigurationState(clients.ServingAlphaClient, names.Config, func(c *v1alpha1.Configuration) (bool, error) {
 		if c.Status.LatestCreatedRevisionName != names.Revision {
 			names.Revision = c.Status.LatestCreatedRevisionName
 			return true, nil
@@ -81,11 +87,11 @@ func TestDestroyPodInflight(t *testing.T) {
 		clients.KubeClient,
 		t.Logf,
 		domain,
-		test.RetryingRouteInconsistency(pkgTest.MatchesAllOf(pkgTest.IsStatusOK, pkgTest.MatchesBody(timeoutExpectedOutput))),
+		v1a1test.RetryingRouteInconsistency(pkgTest.MatchesAllOf(pkgTest.IsStatusOK, pkgTest.MatchesBody(timeoutExpectedOutput))),
 		"TimeoutAppServesText",
 		test.ServingFlags.ResolvableDomain)
 	if err != nil {
-		t.Fatalf("The endpoint for Route %s at domain %s didn't serve the expected text \"%s\": %v", names.Route, domain, helloWorldExpectedOutput, err)
+		t.Fatalf("The endpoint for Route %s at domain %s didn't serve the expected text \"%s\": %v", names.Route, domain, test.HelloWorldText, err)
 	}
 
 	client, err := pkgTest.NewSpoofingClient(clients.KubeClient, t.Logf, domain, test.ServingFlags.ResolvableDomain)
@@ -125,7 +131,7 @@ func TestDestroyPodInflight(t *testing.T) {
 		time.Sleep(timeoutRequestDuration / 2)
 
 		t.Log("Destroying the configuration (also destroys the pods)")
-		return clients.ServingClient.Configs.Delete(names.Config, nil)
+		return clients.ServingAlphaClient.Configs.Delete(names.Config, nil)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -133,15 +139,16 @@ func TestDestroyPodInflight(t *testing.T) {
 	}
 }
 
-const (
-	// Give the pods plenty of time to disappear. It will take them at least 20 seconds to vanish
-	// because we have a hard-coded sleep of 20 seconds before initiating the shutdown process.
-	// This is still well below the 5 minutes it might take them to disappear max.
-	maxTimeToDelete = 180 * time.Second
-)
+// We choose a relatively high upper boundary for the test to give even a busy
+// Kubernetes test system plenty of time to remove the pod quicker than this.
+const revisionTimeout = 5 * time.Minute
 
 func TestDestroyPodTimely(t *testing.T) {
-	t.Parallel()
+	// Not running in parallel on purpose.
+
+	cancel := logstream.Start(t)
+	defer cancel()
+
 	clients := Setup(t)
 
 	names := test.ResourceNames{
@@ -152,43 +159,46 @@ func TestDestroyPodTimely(t *testing.T) {
 	defer test.TearDown(clients, names)
 	test.CleanupOnInterrupt(func() { test.TearDown(clients, names) })
 
-	objects, err := test.CreateRunLatestServiceReady(t, clients, &names, &test.Options{RevisionTimeoutSeconds: 5 * 60})
+	objects, err := v1a1test.CreateRunLatestServiceReady(t, clients, &names, &v1a1test.Options{RevisionTimeoutSeconds: int64(revisionTimeout.Seconds())})
 	if err != nil {
 		t.Fatalf("Failed to create a service: %v", err)
 	}
 
+	pods, err := clients.KubeClient.Kube.CoreV1().Pods(test.ServingNamespace).List(metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", serving.RevisionLabelKey, objects.Revision.Name),
+	})
+	if err != nil || len(pods.Items) == 0 {
+		t.Fatalf("No pods or error: %v", err)
+	}
+
+	podToDelete := pods.Items[0].Name
+	t.Logf("Deleting pod %q", podToDelete)
 	start := time.Now()
+	clients.KubeClient.Kube.CoreV1().Pods(test.ServingNamespace).Delete(podToDelete, &metav1.DeleteOptions{})
 
-	// Deleting the service will also delete all pods.
-	clients.ServingClient.Services.Delete(names.Service, nil)
+	var latestPodState *v1.Pod
+	if err := wait.PollImmediate(1*time.Second, revisionTimeout, func() (bool, error) {
+		pod, err := clients.KubeClient.Kube.CoreV1().Pods(test.ServingNamespace).Get(podToDelete, metav1.GetOptions{})
+		if err != nil {
+			return false, nil
+		}
 
-	// Wait until the pod is shutdown. We don't wait for the pod itself to vanish but rather until all
-	// of the containers of that pod are no longer running. It can take an arbitrarily long time to
-	// actually remove the pod itself while we only care about containers being stopped.
-	deploymentName := rnames.Deployment(objects.Revision)
-	var podList *v1.PodList
-	pkgTest.WaitForPodListState(
-		clients.KubeClient,
-		func(p *v1.PodList) (bool, error) {
-			podList = p
-			for _, pod := range p.Items {
-				if !strings.Contains(pod.Name, deploymentName) {
-					continue
-				}
-				for _, status := range pod.Status.ContainerStatuses {
-					// There are still containers running, keep retrying.
-					if status.State.Running != nil {
-						return false, nil
-					}
-				}
+		latestPodState = pod
+		for _, status := range pod.Status.ContainerStatuses {
+			// There are still containers running, keep retrying.
+			if status.State.Running != nil {
+				return false, nil
 			}
-			return true, nil
-		},
-		"WaitForPodsToDisappear", test.ServingNamespace)
+		}
+		return true, nil
+	}); err != nil {
+		t.Logf("Latest state: %s", spew.Sprint(latestPodState))
+		t.Fatalf("Did not observe %q to actually be deleted", podToDelete)
+	}
 
+	// Make sure the pod was deleted significantly faster than the revision timeout.
 	timeToDelete := time.Since(start)
-	if timeToDelete > maxTimeToDelete {
-		t.Logf("Pod list: %s", spew.Sprint(podList))
-		t.Errorf("Time to delete pods = %v, want < %v", timeToDelete, maxTimeToDelete)
+	if timeToDelete > revisionTimeout-30*time.Second {
+		t.Errorf("Time to delete pods = %v, want < %v", timeToDelete, revisionTimeout)
 	}
 }

@@ -34,7 +34,9 @@ import (
 	pkgTest "github.com/knative/pkg/test"
 	"github.com/knative/pkg/test/spoof"
 	"github.com/knative/serving/test"
+	v1a1test "github.com/knative/serving/test/v1alpha1"
 	"github.com/knative/test-infra/shared/junit"
+	perf "github.com/knative/test-infra/shared/performance"
 	"github.com/knative/test-infra/shared/testgrid"
 	"golang.org/x/sync/errgroup"
 )
@@ -149,7 +151,7 @@ func testConcurrencyN(t *testing.T, concurrency int) []junit.TestCase {
 	test.CleanupOnInterrupt(func() { TearDown(perfClients, names, t.Logf) })
 
 	t.Log("Creating a new Service")
-	objs, err := test.CreateRunLatestServiceReady(t, clients, &names, &test.Options{
+	objs, err := v1a1test.CreateRunLatestServiceReady(t, clients, &names, &v1a1test.Options{
 		ContainerConcurrency: 1,
 		ContainerResources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
@@ -177,7 +179,7 @@ func testConcurrencyN(t *testing.T, concurrency int) []junit.TestCase {
 		clients.KubeClient,
 		t.Logf,
 		domain+"/?timeout=10", // To generate any kind of a valid response.
-		test.RetryingRouteInconsistency(func(resp *spoof.Response) (bool, error) {
+		v1a1test.RetryingRouteInconsistency(func(resp *spoof.Response) (bool, error) {
 			_, _, err := parseResponse(string(resp.Body))
 			return err == nil, nil
 		}),
@@ -234,10 +236,10 @@ func testConcurrencyN(t *testing.T, concurrency int) []junit.TestCase {
 			t.Logf("Never scaled to %d", i)
 		} else {
 			t.Logf("Took %v to scale to %d", toConcurrency, i)
-			tc = append(tc, CreatePerfTestCase(float32(toConcurrency/time.Millisecond), fmt.Sprintf("to%d(ms)", i), t.Name()))
+			tc = append(tc, perf.CreatePerfTestCase(float32(toConcurrency/time.Millisecond), fmt.Sprintf("to%d(ms)", i), t.Name()))
 		}
 	}
-	tc = append(tc, CreatePerfTestCase(float32(failedRequests), "failed requests", t.Name()))
+	tc = append(tc, perf.CreatePerfTestCase(float32(failedRequests), "failed requests", t.Name()))
 
 	return tc
 }

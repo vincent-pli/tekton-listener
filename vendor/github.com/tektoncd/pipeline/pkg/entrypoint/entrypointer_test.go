@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Knative Authors.
+Copyright 2019 The Tekton Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,11 +17,11 @@ limitations under the License.
 package entrypoint
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"golang.org/x/xerrors"
 )
 
 func TestEntrypointerFailures(t *testing.T) {
@@ -175,7 +175,7 @@ func TestEntrypointer(t *testing.T) {
 
 type fakeWaiter struct{ waited *string }
 
-func (f *fakeWaiter) Wait(file string) error {
+func (f *fakeWaiter) Wait(file string, expectContent bool) error {
 	f.waited = &file
 	return nil
 }
@@ -193,14 +193,14 @@ func (f *fakePostWriter) Write(file string) { f.wrote = &file }
 
 type fakeErrorWaiter struct{ waited *string }
 
-func (f *fakeErrorWaiter) Wait(file string) error {
+func (f *fakeErrorWaiter) Wait(file string, expectContent bool) error {
 	f.waited = &file
-	return fmt.Errorf("waiter failed")
+	return xerrors.New("waiter failed")
 }
 
 type fakeErrorRunner struct{ args *[]string }
 
 func (f *fakeErrorRunner) Run(args ...string) error {
 	f.args = &args
-	return fmt.Errorf("runner failed")
+	return xerrors.New("runner failed")
 }

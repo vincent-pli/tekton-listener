@@ -88,8 +88,8 @@ func main() {
 		Client:  kubeClient,
 		Options: options,
 		Handlers: map[schema.GroupVersionKind]webhook.GenericCRD{
-			v1alpha1.SchemeGroupVersion.WithKind("ListenerTemplate"): &v1alpha1.ListenerTemplate{},
-			v1alpha1.SchemeGroupVersion.WithKind("EventBinding"):     &v1alpha1.EventBinding{},
+			v1alpha1.GroupVersion.WithKind("ListenerTemplate"): &v1alpha1.ListenerTemplate{},
+			v1alpha1.GroupVersion.WithKind("EventBinding"):     &v1alpha1.EventBinding{},
 		},
 		Logger: logger,
 	}

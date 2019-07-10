@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha1_test
 
 import (
 	"context"
@@ -23,15 +23,16 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/knative/pkg/apis"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
 
-var validResource = TaskResource{
+var validResource = v1alpha1.TaskResource{
 	Name: "source",
 	Type: "git",
 }
 
-var validImageResource = TaskResource{
+var validImageResource = v1alpha1.TaskResource{
 	Name: "source",
 	Type: "image",
 }
@@ -48,9 +49,10 @@ var invalidBuildSteps = []corev1.Container{{
 
 func TestTaskSpecValidate(t *testing.T) {
 	type fields struct {
-		Inputs            *Inputs
-		Outputs           *Outputs
+		Inputs            *v1alpha1.Inputs
+		Outputs           *v1alpha1.Outputs
 		BuildSteps        []corev1.Container
+		StepTemplate      *corev1.Container
 		ContainerTemplate *corev1.Container
 	}
 	tests := []struct {
@@ -59,9 +61,9 @@ func TestTaskSpecValidate(t *testing.T) {
 	}{{
 		name: "valid inputs",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{validResource},
-				Params: []TaskParam{
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{validResource},
+				Params: []v1alpha1.ParamSpec{
 					{
 						Name:        "task",
 						Description: "param",
@@ -74,49 +76,49 @@ func TestTaskSpecValidate(t *testing.T) {
 	}, {
 		name: "valid outputs",
 		fields: fields{
-			Outputs: &Outputs{
-				Resources: []TaskResource{validResource},
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
 			BuildSteps: validBuildSteps,
 		},
 	}, {
 		name: "both valid",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{validResource},
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{validResource},
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
 			BuildSteps: validBuildSteps,
 		},
 	}, {
 		name: "output image resoure",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{validImageResource},
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{validImageResource},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{validImageResource},
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{validImageResource},
 			},
 			BuildSteps: validBuildSteps,
 		},
 	}, {
 		name: "valid template variable",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{{
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{{
 					Name: "foo",
-					Type: PipelineResourceTypeImage,
+					Type: v1alpha1.PipelineResourceTypeImage,
 				}},
-				Params: []TaskParam{{
+				Params: []v1alpha1.ParamSpec{{
 					Name: "baz",
 				}, {
 					Name: "foo-is-baz",
 				}},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{validResource},
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
 			BuildSteps: []corev1.Container{{
 				Name:       "mystep",
@@ -126,7 +128,19 @@ func TestTaskSpecValidate(t *testing.T) {
 			}},
 		},
 	}, {
-		name: "container template included in validation",
+		name: "step template included in validation",
+		fields: fields{
+			BuildSteps: []corev1.Container{{
+				Name:    "astep",
+				Command: []string{"echo"},
+				Args:    []string{"hello"},
+			}},
+			StepTemplate: &corev1.Container{
+				Image: "some-image",
+			},
+		},
+	}, {
+		name: "deprecated (#977) container template included in validation",
 		fields: fields{
 			BuildSteps: []corev1.Container{{
 				Name:    "astep",
@@ -137,13 +151,32 @@ func TestTaskSpecValidate(t *testing.T) {
 				Image: "some-image",
 			},
 		},
+	}, {
+		name: "deprecated (#977) container template supported with step template",
+		fields: fields{
+			BuildSteps: []corev1.Container{{
+				Name:    "astep",
+				Command: []string{"echo"},
+				Args:    []string{"hello"},
+			}},
+			StepTemplate: &corev1.Container{
+				Env: []corev1.EnvVar{{
+					Name:  "somevar",
+					Value: "someval",
+				}},
+			},
+			ContainerTemplate: &corev1.Container{
+				Image: "some-image",
+			},
+		},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts := &TaskSpec{
+			ts := &v1alpha1.TaskSpec{
 				Inputs:            tt.fields.Inputs,
 				Outputs:           tt.fields.Outputs,
 				Steps:             tt.fields.BuildSteps,
+				StepTemplate:      tt.fields.StepTemplate,
 				ContainerTemplate: tt.fields.ContainerTemplate,
 			}
 			ctx := context.Background()
@@ -157,8 +190,8 @@ func TestTaskSpecValidate(t *testing.T) {
 
 func TestTaskSpecValidateError(t *testing.T) {
 	type fields struct {
-		Inputs     *Inputs
-		Outputs    *Outputs
+		Inputs     *v1alpha1.Inputs
+		Outputs    *v1alpha1.Outputs
 		BuildSteps []corev1.Container
 	}
 	tests := []struct {
@@ -174,8 +207,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "no build",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{validResource},
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
 		},
 		expectedError: apis.FieldError{
@@ -185,8 +218,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "one invalid input",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{
 					{
 						Name: "source",
 						Type: "what",
@@ -194,8 +227,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 					validResource,
 				},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{
 					validResource,
 				},
 			},
@@ -208,13 +241,13 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "one invalid output",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{
 					validResource,
 				},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{
 					{
 						Name: "who",
 						Type: "what",
@@ -231,14 +264,14 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "duplicated inputs",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{
 					validResource,
 					validResource,
 				},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{
 					validResource,
 				},
 			},
@@ -251,13 +284,13 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "duplicated outputs",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{
 					validResource,
 				},
 			},
-			Outputs: &Outputs{
-				Resources: []TaskResource{
+			Outputs: &v1alpha1.Outputs{
+				Resources: []v1alpha1.TaskResource{
 					validResource,
 					validResource,
 				},
@@ -271,8 +304,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "invalid build",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{validResource},
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
 			BuildSteps: []corev1.Container{},
 		},
@@ -283,8 +316,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "invalid build step name",
 		fields: fields{
-			Inputs: &Inputs{
-				Resources: []TaskResource{validResource},
+			Inputs: &v1alpha1.Inputs{
+				Resources: []v1alpha1.TaskResource{validResource},
 			},
 			BuildSteps: invalidBuildSteps,
 		},
@@ -334,8 +367,8 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}, {
 		name: "Inexistent param variable with existing",
 		fields: fields{
-			Inputs: &Inputs{
-				Params: []TaskParam{
+			Inputs: &v1alpha1.Inputs{
+				Params: []v1alpha1.ParamSpec{
 					{
 						Name:        "foo",
 						Description: "param",
@@ -356,7 +389,7 @@ func TestTaskSpecValidateError(t *testing.T) {
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts := &TaskSpec{
+			ts := &v1alpha1.TaskSpec{
 				Inputs:  tt.fields.Inputs,
 				Outputs: tt.fields.Outputs,
 				Steps:   tt.fields.BuildSteps,

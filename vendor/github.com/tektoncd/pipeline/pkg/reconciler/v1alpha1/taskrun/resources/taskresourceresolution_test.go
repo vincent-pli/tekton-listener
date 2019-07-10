@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors
+Copyright 2019 The Tekton Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ limitations under the License.
 package resources
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
+	"golang.org/x/xerrors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -61,6 +61,7 @@ func TestResolveTaskRun(t *testing.T) {
 	}}
 
 	taskName := "orchestrate"
+	kind := v1alpha1.NamespacedTaskKind
 	taskSpec := v1alpha1.TaskSpec{
 		Steps: []corev1.Container{{
 			Name: "step1",
@@ -90,7 +91,7 @@ func TestResolveTaskRun(t *testing.T) {
 		return r, nil
 	}
 
-	rtr, err := ResolveTaskResources(&taskSpec, taskName, inputs, outputs, gr)
+	rtr, err := ResolveTaskResources(&taskSpec, taskName, kind, inputs, outputs, gr)
 	if err != nil {
 		t.Fatalf("Did not expect error trying to resolve TaskRun: %s", err)
 	}
@@ -169,8 +170,8 @@ func TestResolveTaskRun_missingOutput(t *testing.T) {
 			Name: "another-git-repo",
 		}}}
 
-	gr := func(n string) (*v1alpha1.PipelineResource, error) { return nil, fmt.Errorf("nope") }
-	_, err := ResolveTaskResources(&v1alpha1.TaskSpec{}, "orchestrate", []v1alpha1.TaskResourceBinding{}, outputs, gr)
+	gr := func(n string) (*v1alpha1.PipelineResource, error) { return nil, xerrors.New("nope") }
+	_, err := ResolveTaskResources(&v1alpha1.TaskSpec{}, "orchestrate", v1alpha1.NamespacedTaskKind, []v1alpha1.TaskResourceBinding{}, outputs, gr)
 	if err == nil {
 		t.Fatalf("Expected to get error because output resource couldn't be resolved")
 	}
@@ -182,9 +183,9 @@ func TestResolveTaskRun_missingInput(t *testing.T) {
 		ResourceRef: v1alpha1.PipelineResourceRef{
 			Name: "git-repo",
 		}}}
-	gr := func(n string) (*v1alpha1.PipelineResource, error) { return nil, fmt.Errorf("nope") }
+	gr := func(n string) (*v1alpha1.PipelineResource, error) { return nil, xerrors.New("nope") }
 
-	_, err := ResolveTaskResources(&v1alpha1.TaskSpec{}, "orchestrate", inputs, []v1alpha1.TaskResourceBinding{}, gr)
+	_, err := ResolveTaskResources(&v1alpha1.TaskSpec{}, "orchestrate", v1alpha1.NamespacedTaskKind, inputs, []v1alpha1.TaskResourceBinding{}, gr)
 	if err == nil {
 		t.Fatalf("Expected to get error because output resource couldn't be resolved")
 	}
@@ -198,7 +199,7 @@ func TestResolveTaskRun_noResources(t *testing.T) {
 
 	gr := func(n string) (*v1alpha1.PipelineResource, error) { return &v1alpha1.PipelineResource{}, nil }
 
-	rtr, err := ResolveTaskResources(&taskSpec, "orchestrate", []v1alpha1.TaskResourceBinding{}, []v1alpha1.TaskResourceBinding{}, gr)
+	rtr, err := ResolveTaskResources(&taskSpec, "orchestrate", v1alpha1.NamespacedTaskKind, []v1alpha1.TaskResourceBinding{}, []v1alpha1.TaskResourceBinding{}, gr)
 	if err != nil {
 		t.Fatalf("Did not expect error trying to resolve TaskRun: %s", err)
 	}

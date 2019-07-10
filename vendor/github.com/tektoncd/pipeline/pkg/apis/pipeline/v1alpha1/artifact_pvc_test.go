@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Knative Authors.
+Copyright 2019 The Tekton Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha1_test
 
 import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/tektoncd/pipeline/pkg/apis/pipeline/v1alpha1"
 	"github.com/tektoncd/pipeline/test/names"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,7 +29,7 @@ import (
 func TestPVCGetCopyFromContainerSpec(t *testing.T) {
 	names.TestingSeed()
 
-	pvc := ArtifactPVC{
+	pvc := v1alpha1.ArtifactPVC{
 		Name: "pipelinerun-pvc",
 	}
 	want := []corev1.Container{{
@@ -47,7 +48,7 @@ func TestPVCGetCopyFromContainerSpec(t *testing.T) {
 func TestPVCGetCopyToContainerSpec(t *testing.T) {
 	names.TestingSeed()
 
-	pvc := ArtifactPVC{
+	pvc := v1alpha1.ArtifactPVC{
 		Name: "pipelinerun-pvc",
 	}
 	want := []corev1.Container{{
@@ -70,6 +71,21 @@ func TestPVCGetCopyToContainerSpec(t *testing.T) {
 	}
 }
 
+func TestPVCGetPvcMount(t *testing.T) {
+	names.TestingSeed()
+	name := "pipelinerun-pvc"
+	pvcDir := "/pvc"
+
+	want := corev1.VolumeMount{
+		Name:      name,
+		MountPath: pvcDir,
+	}
+	got := v1alpha1.GetPvcMount(name)
+	if d := cmp.Diff(got, want); d != "" {
+		t.Errorf("Diff:\n%s", d)
+	}
+}
+
 func TestPVCGetMakeDirContainerSpec(t *testing.T) {
 	names.TestingSeed()
 
@@ -79,17 +95,17 @@ func TestPVCGetMakeDirContainerSpec(t *testing.T) {
 		Command: []string{"/ko-app/bash"},
 		Args:    []string{"-args", "mkdir -p /workspace/destination"},
 	}
-	got := CreateDirContainer("workspace", "/workspace/destination")
+	got := v1alpha1.CreateDirContainer("workspace", "/workspace/destination")
 	if d := cmp.Diff(got, want); d != "" {
 		t.Errorf("Diff:\n%s", d)
 	}
 }
 
 func TestStorageBasePath(t *testing.T) {
-	pvc := ArtifactPVC{
+	pvc := v1alpha1.ArtifactPVC{
 		Name: "pipelinerun-pvc",
 	}
-	pipelinerun := &PipelineRun{
+	pipelinerun := &v1alpha1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "foo",
 			Name:      "pipelineruntest",

@@ -219,7 +219,8 @@ func testPublishAndReceive(t *testing.T, topic *Topic, sub *Subscription, maxMsg
 	// Use a timeout to ensure that Pull does not block indefinitely if there are
 	// unexpectedly few messages available.
 	now := time.Now()
-	timeoutCtx, _ := context.WithTimeout(ctx, time.Minute)
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	gotMsgs, err := pullN(timeoutCtx, sub, len(want), func(ctx context.Context, m *Message) {
 		m.Ack()
 	})
@@ -367,8 +368,8 @@ func TestIntegration_UpdateSubscription(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTopic error: %v", err)
 	}
-	defer topic.Stop()
 	defer topic.Delete(ctx)
+	defer topic.Stop()
 
 	var sub *Subscription
 	if sub, err = client.CreateSubscription(ctx, subIDs.New(), SubscriptionConfig{Topic: topic}); err != nil {
@@ -472,8 +473,8 @@ func TestIntegration_UpdateTopic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTopic error: %v", err)
 	}
-	defer topic.Stop()
 	defer topic.Delete(ctx)
+	defer topic.Stop()
 
 	got, err := topic.Config(ctx)
 	if err != nil {
@@ -537,8 +538,8 @@ func TestIntegration_Errors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTopic error: %v", err)
 	}
-	defer topic.Stop()
 	defer topic.Delete(ctx)
+	defer topic.Stop()
 
 	// Out-of-range retention duration.
 	sub, err := client.CreateSubscription(ctx, subIDs.New(), SubscriptionConfig{
@@ -619,8 +620,8 @@ func TestIntegration_MessageStoragePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTopic error: %v", err)
 	}
-	defer topic.Stop()
 	defer topic.Delete(ctx)
+	defer topic.Stop()
 
 	config, err := topic.Config(ctx)
 	if err != nil {

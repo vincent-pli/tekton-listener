@@ -22,7 +22,8 @@ entire Kubernetes cluster.
   - [Outputs](#outputs)
   - [Controlling where resources are mounted](#controlling-where-resources-are-mounted)
   - [Volumes](#volumes)
-  - [Container Template](#container-template)
+  - [Container Template **deprecated**](#step-template)
+  - [Step Template](#step-template)
   - [Templating](#templating)
 - [Examples](#examples)
 
@@ -74,8 +75,9 @@ following fields:
     created by your `Task`
   - [`volumes`](#volumes) - Specifies one or more volumes that you want to make
     available to your `Task`'s steps.
-  - [`containerTemplate`](#container-template) - Specifies a `Container`
+  - [`stepTemplate`](#step-template) - Specifies a `Container` step
     definition to use as the basis for all steps within your `Task`.
+  - [`containerTemplate`](#step-template) - **deprecated** Previous name of `stepTemplate`.
 
 [kubernetes-overview]:
   https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/#required-fields
@@ -123,6 +125,9 @@ spec:
 
 The `steps` field is required. You define one or more `steps` fields to define
 the body of a `Task`.
+
+If multiple `steps` are defined, they will be executed in the same order as they
+are defined, if the `Task` is invoked by a [TaskRun](taskruns.md).
 
 Each `steps` in a `Task` must specify a container image that adheres to the
 [container contract](./container-contract.md). For each of the `steps` fields,
@@ -211,7 +216,8 @@ Input resources, like source code (git) or artifacts, are dumped at path
 `/workspace/task_resource_name` within a mounted
 [volume](https://kubernetes.io/docs/concepts/storage/volumes/) and is available
 to all [`steps`](#steps) of your `Task`. The path that the resources are mounted
-at can be overridden with the `targetPath` value.
+at can be overridden with the `targetPath` value. Steps can use the `path`
+[template](#Templating) key to refer to the local path to the mounted resource.
 
 ### Outputs
 
@@ -325,19 +331,19 @@ For example, use volumes to accomplish one of the following common tasks:
   unsafe_. Use [kaniko](https://github.com/GoogleContainerTools/kaniko) instead.
   This is used only for the purposes of demonstration.
 
-### Container Template
+### Step Template
 
 Specifies a [`Container`](https://kubernetes.io/docs/concepts/containers/)
 configuration that will be used as the basis for all [`steps`](#steps) in your
 `Task`. Configuration in an individual step will override or merge with the
 container template's configuration.
 
-In the example below, the `Task` specifies a `containerTemplate` with the
+In the example below, the `Task` specifies a `stepTemplate` with the
 environment variable `FOO` set to `bar`. The first step will use that value for
 `FOO`, but in the second step, `FOO` is overridden and set to `baz`.
 
 ```yaml
-containerTemplate:
+stepTemplate:
   env:
     - name: "FOO"
       value: "bar"
@@ -352,6 +358,9 @@ steps:
       - name: "FOO"
         value: "baz"
 ```
+
+_The field `containerTemplate` provides the same functionality but is **deprecated**
+and will be removed in a future release ([#977](https://github.com/tektoncd/pipeline/issues/977))._
 
 ### Templating
 
@@ -370,6 +379,13 @@ Or for an output resource:
 
 ```shell
 ${outputs.resources.<name>.<key>}
+```
+
+The local path to a resource on the mounted volume can be accessed using the
+`path` key:
+
+```shell
+${inputs.resouces.<name>.path}
 ```
 
 To access an input parameter, replace `resources` with `params`.
@@ -393,7 +409,9 @@ Use these code snippets to help you understand how to define your `Tasks`.
 
 - [Example of image building and pushing](#example-task)
 - [Mounting extra volumes](#using-an-extra-volume)
-- [Mounting configMap as volume source](#using-kubernetes-configmap-as-volume-source)
+- [Mounting configMap as volume
+  source](#using-kubernetes-configmap-as-volume-source)
+- [Using secret as environment source](#using-secret-as-environment-source)
 
 _Tip: See the collection of simple
 [examples](https://github.com/tektoncd/pipeline/tree/master/examples) for
@@ -506,6 +524,43 @@ spec:
     - name: "${inputs.params.volumeName}"
       configMap:
         name: "${inputs.params.CFGNAME}"
+```
+
+#### Using secret as environment source
+
+```yaml
+apiVersion: tekton.dev/v1alpha1
+kind: Task
+metadata:
+  name: goreleaser
+spec:
+  inputs:
+    params:
+    - name: package
+      description: base package to build in
+    - name: github-token-secret
+      description: name of the secret holding the github-token
+      default: github-token
+    resources:
+    - name: source
+      type: git
+      targetPath: src/${inputs.params.package}
+  steps:
+  - name: release
+    image: goreleaser/goreleaser
+    workingdir: /workspace/src/${inputs.params.package}
+    command:
+    - goreleaser
+    args:
+    - release
+    env:
+    - name: GOPATH
+      value: /workspace
+    - name: GITHUB_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: ${inputs.params.github-token-secret}
+          key: bot-token
 ```
 
 Except as otherwise noted, the content of this page is licensed under the
